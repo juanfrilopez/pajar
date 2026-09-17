@@ -1,0 +1,6 @@
+[gd_scene format=3 load_steps=2]
+
+[ext_resource type="Script" path="res://debug_logger.gd" id="1_logger"]
+
+[node name="DebugLogger" type="Node3D"]
+script = ExtResource("1_logger")
