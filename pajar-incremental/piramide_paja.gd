@@ -16,7 +16,7 @@ enum StrawTier {
 	TIER_3_GOLDEN = 2
 }
 
-const STRAW_TIERS = {
+const STRAW_TIERS: Dictionary = {
 	StrawTier.TIER_1_COMMON: {
 		"name": "Paja Común",
 		"sell_value": 1,
@@ -94,7 +94,7 @@ func _ensure_shared_resources():
 		return
 	_tier_mats.clear()
 	for tier in range(3):
-		var mat := StandardMaterial3D.new()
+		var mat: StandardMaterial3D = StandardMaterial3D.new()
 		mat.vertex_color_use_as_albedo = true
 		mat.roughness = 0.88
 		mat.metallic = 0.0
@@ -111,7 +111,7 @@ func _ensure_multimeshes():
 	_mmis.clear()
 	_mms.clear()
 	for tier in range(3):
-		var mmi := MultiMeshInstance3D.new()
+		var mmi: MultiMeshInstance3D = MultiMeshInstance3D.new()
 		mmi.name = "StrawsMM_%d" % tier
 		mmi.material_override = _tier_mats[tier]
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -125,8 +125,8 @@ func _ensure_pile_collision():
 	else:
 		pile_collision_body = StaticBody3D.new()
 		pile_collision_body.name = "PileCollision"
-		var col_shape := CollisionShape3D.new()
-		var cyl := CylinderShape3D.new()
+		var col_shape: CollisionShape3D = CollisionShape3D.new()
+		var cyl: CylinderShape3D = CylinderShape3D.new()
 		cyl.height = pile_height
 		cyl.radius = base_radius
 		col_shape.shape = cyl
@@ -155,36 +155,36 @@ func generate_pile():
 	var buckets: Array = [[], [], []]
 
 	for i in range(total_straws):
-		var height_factor := pow(randf(), 1.45)
-		var y := height_factor * pile_height + randf_range(-0.02, 0.02)
-		var max_r := base_radius * (1.0 - height_factor * 0.58)
-		var r := sqrt(randf()) * max_r
-		var angle := randf() * TAU
-		var x := cos(angle) * r + randf_range(-0.04, 0.04)
-		var z := sin(angle) * r + randf_range(-0.04, 0.04)
+		var height_factor: float = pow(randf(), 1.45)
+		var y: float = height_factor * pile_height + randf_range(-0.02, 0.02)
+		var max_r: float = base_radius * (1.0 - height_factor * 0.58)
+		var r: float = sqrt(randf()) * max_r
+		var angle: float = randf() * TAU
+		var x: float = cos(angle) * r + randf_range(-0.04, 0.04)
+		var z: float = sin(angle) * r + randf_range(-0.04, 0.04)
 
-		var tier := determine_tier_by_height(height_factor)
+		var tier: int = determine_tier_by_height(height_factor)
 		# Ultrafina: radio ~0.6–1.4 cm (antes las cajas medían 3.5–7 cm)
-		var thickness := randf_range(0.006, 0.014)
-		var length := randf_range(0.55, 1.25)
+		var thickness: float = randf_range(0.006, 0.014)
+		var length: float = randf_range(0.55, 1.25)
 
-		var rot_y := randf() * TAU
-		var tilt_range := lerp(12.0, 32.0, height_factor)
-		var rot_x := deg_to_rad(90.0 + randf_range(-tilt_range, tilt_range))
-		var rot_z := deg_to_rad(randf_range(-16.0, 16.0))
-		var to_center := Vector2(-x, -z)
+		var rot_y: float = randf() * TAU
+		var tilt_range: float = lerpf(12.0, 32.0, height_factor)
+		var rot_x: float = deg_to_rad(90.0 + randf_range(-tilt_range, tilt_range))
+		var rot_z: float = deg_to_rad(randf_range(-16.0, 16.0))
+		var to_center: Vector2 = Vector2(-x, -z)
 		if to_center.length() > 0.001:
 			to_center = to_center.normalized()
 			rot_x += to_center.x * 0.04
 			rot_z += to_center.y * 0.04
 
 		var base_color: Color = STRAW_TIERS[tier]["color"]
-		var varied := Color(
+		var varied: Color = Color(
 			clampf(base_color.r * randf_range(0.88, 1.10), 0.0, 1.0),
 			clampf(base_color.g * randf_range(0.88, 1.10), 0.0, 1.0),
 			clampf(base_color.b * randf_range(0.88, 1.12), 0.0, 1.0)
 		)
-		var data := StrawData.new(i, tier, Vector3(x, y, z), Vector3(rot_x, rot_y, rot_z), length, thickness, varied)
+		var data: StrawData = StrawData.new(i, tier, Vector3(x, y, z), Vector3(rot_x, rot_y, rot_z), length, thickness, varied)
 		straws.append(data)
 		buckets[tier].append(data)
 
@@ -195,11 +195,11 @@ func generate_pile():
 func _fill_multimeshes(buckets: Array) -> void:
 	for tier in range(3):
 		var list: Array = buckets[tier]
-		var mm := MultiMesh.new()
+		var mm: MultiMesh = MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_colors = true
 		mm.mesh = _straw_mesh
-		mm.instance_count = max(list.size(), 1)
+		mm.instance_count = maxi(list.size(), 1)
 		if list.is_empty():
 			mm.set_instance_transform(0, Transform3D(Basis().scaled(Vector3.ZERO), Vector3(0, -50, 0)))
 			mm.set_instance_color(0, Color(1, 1, 1, 0))
@@ -213,14 +213,14 @@ func _fill_multimeshes(buckets: Array) -> void:
 		_mmis[tier].multimesh = mm
 
 func _straw_transform(data: StrawData) -> Transform3D:
-	var basis := Basis.from_euler(data.rotation)
+	var basis: Basis = Basis.from_euler(data.rotation)
 	basis = basis.scaled(Vector3(data.thickness, data.length, data.thickness))
 	return Transform3D(basis, data.position)
 
 func _hide_instance(data: StrawData) -> void:
 	if data.mm_index < 0:
 		return
-	var mm := _mms[data.tier]
+	var mm: MultiMesh = _mms[data.tier]
 	if mm == null:
 		return
 	mm.set_instance_transform(data.mm_index, Transform3D(Basis().scaled(Vector3.ZERO), Vector3(0, -80, 0)))
@@ -228,7 +228,7 @@ func _hide_instance(data: StrawData) -> void:
 func _sync_instance(data: StrawData) -> void:
 	if data.is_removed or data.mm_index < 0:
 		return
-	var mm := _mms[data.tier]
+	var mm: MultiMesh = _mms[data.tier]
 	if mm == null:
 		return
 	mm.set_instance_transform(data.mm_index, _straw_transform(data))
@@ -246,7 +246,7 @@ func determine_tier_by_height(ratio: float) -> int:
 	if ratio < 0.45:
 		return StrawTier.TIER_1_COMMON if randf() < 0.85 else StrawTier.TIER_2_DRY
 	elif ratio < 0.78:
-		var r := randf()
+		var r: float = randf()
 		if r < 0.4:
 			return StrawTier.TIER_1_COMMON
 		elif r < 0.85:
@@ -254,7 +254,7 @@ func determine_tier_by_height(ratio: float) -> int:
 		else:
 			return StrawTier.TIER_3_GOLDEN
 	else:
-		var r2 := randf()
+		var r2: float = randf()
 		if r2 < 0.2:
 			return StrawTier.TIER_1_COMMON
 		elif r2 < 0.55:
@@ -265,7 +265,7 @@ func determine_tier_by_height(ratio: float) -> int:
 func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 	if index < 0 or index >= straws.size():
 		return
-	var data := straws[index]
+	var data: StrawData = straws[index]
 	if data.is_removed:
 		return
 
@@ -273,7 +273,7 @@ func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 		crear_texto_flotante("¡Mano llena!", Color.RED)
 		return
 
-	var agregado := false
+	var agregado: bool = false
 	if jugador.has_method("agregar_paja"):
 		agregado = jugador.agregar_paja(data.tier, 1)
 	else:
@@ -291,10 +291,10 @@ func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 	_hide_instance(data)
 	animar_recoleccion_hebra(data)
 
-	var tier_info = STRAW_TIERS[data.tier]
+	var tier_info: Dictionary = STRAW_TIERS[data.tier]
 	crear_texto_flotante("+1 %s" % tier_info["name"], tier_info["color"])
 
-	var remaining := get_remaining_count()
+	var remaining: int = get_remaining_count()
 	if remaining == 0 and auto_regenerate:
 		if not is_regenerating:
 			is_regenerating = true
@@ -306,7 +306,7 @@ func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 		_apply_settle_effect(data.position)
 
 func get_remaining_count() -> int:
-	var c := 0
+	var c: int = 0
 	for s in straws:
 		if not s.is_removed:
 			c += 1
@@ -316,21 +316,21 @@ func _apply_settle_effect(removed_pos: Vector3):
 	for s in straws:
 		if s.is_removed:
 			continue
-		var dist := s.position.distance_to(removed_pos)
+		var dist: float = s.position.distance_to(removed_pos)
 		if dist < 0.55:
-			var fall_amount := (0.55 - dist) * 0.12
-			var target_y := max(0.02, s.position.y - fall_amount)
+			var fall_amount: float = (0.55 - dist) * 0.12
+			var target_y: float = maxf(0.02, s.position.y - fall_amount)
 			s.position.y = target_y
 			_sync_instance(s)
 
 func animar_recoleccion_hebra(data: StrawData):
-	var node := MeshInstance3D.new()
+	var node: MeshInstance3D = MeshInstance3D.new()
 	node.mesh = _pickup_mesh
 	node.material_override = _tier_mats[data.tier]
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.transform = _straw_transform(data)
 	straws_container.add_child(node)
-	var tween := get_tree().create_tween()
+	var tween: Tween = get_tree().create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(node, "position:y", node.position.y + 0.45, 0.15)
 	tween.tween_property(node, "scale", Vector3(0.08, 0.08, 0.08), 0.2).set_delay(0.05)
@@ -338,11 +338,11 @@ func animar_recoleccion_hebra(data: StrawData):
 
 func hacer_clic(jugador, hit_pos: Vector3 = Vector3.ZERO):
 	if hit_pos != Vector3.ZERO:
-		var closest_idx := find_closest_straw(hit_pos)
+		var closest_idx: int = find_closest_straw(hit_pos)
 		if closest_idx != -1:
 			try_pick_straw(closest_idx, jugador, hit_pos)
 			return
-	var candidates := get_exposed_straws()
+	var candidates: Array = get_exposed_straws()
 	if candidates.size() > 0:
 		var rnd: int = candidates[randi() % candidates.size()]
 		try_pick_straw(rnd, jugador, hit_pos)
@@ -350,16 +350,16 @@ func hacer_clic(jugador, hit_pos: Vector3 = Vector3.ZERO):
 		crear_texto_flotante("¡Sin paja!", Color.WHITE)
 
 func find_closest_straw(world_pos: Vector3) -> int:
-	var local_pos := to_local(world_pos)
-	var best_idx := -1
-	var best_score := 1e9
+	var local_pos: Vector3 = to_local(world_pos)
+	var best_idx: int = -1
+	var best_score: float = 1e9
 	for i in range(straws.size()):
-		var s := straws[i]
+		var s: StrawData = straws[i]
 		if s.is_removed:
 			continue
-		var d := s.position.distance_to(local_pos)
+		var d: float = s.position.distance_to(local_pos)
 		# Preferir hebras de la superficie (más altas) si están cerca del impacto
-		var score := d - s.position.y * 0.12
+		var score: float = d - s.position.y * 0.12
 		if score < best_score:
 			best_score = score
 			best_idx = i
@@ -368,14 +368,14 @@ func find_closest_straw(world_pos: Vector3) -> int:
 func get_exposed_straws() -> Array:
 	var exposed: Array = []
 	for i in range(straws.size()):
-		var s := straws[i]
+		var s: StrawData = straws[i]
 		if s.is_removed:
 			continue
-		var dist_from_center := Vector2(s.position.x, s.position.z).length()
-		var height_ratio := 0.0
+		var dist_from_center: float = Vector2(s.position.x, s.position.z).length()
+		var height_ratio: float = 0.0
 		if pile_height > 0.001:
 			height_ratio = s.position.y / pile_height
-		var max_r_at_height := base_radius * (1.0 - height_ratio * 0.5)
+		var max_r_at_height: float = base_radius * (1.0 - height_ratio * 0.5)
 		if dist_from_center > max_r_at_height * 0.65 or s.position.y > pile_height * 0.5:
 			exposed.append(i)
 	if exposed.size() < 10:
@@ -386,7 +386,7 @@ func get_exposed_straws() -> Array:
 	return exposed
 
 func crear_texto_flotante(texto: String, color: Color):
-	var label := Label3D.new()
+	var label: Label3D = Label3D.new()
 	label.text = texto
 	label.font_size = 48
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -394,7 +394,7 @@ func crear_texto_flotante(texto: String, color: Color):
 	label.no_depth_test = false
 	label.position = Vector3(randf_range(-0.5, 0.5), pile_height + 1.0 + randf_range(0, 0.5), randf_range(-0.5, 0.5))
 	add_child(label)
-	var tween := get_tree().create_tween()
+	var tween: Tween = get_tree().create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(label, "position:y", label.position.y + 1.2, 0.8)
 	tween.tween_property(label, "modulate:a", 0.0, 0.8)
@@ -403,7 +403,7 @@ func crear_texto_flotante(texto: String, color: Color):
 func debug_info():
 	DebugLogger.log("=== Piramide Debug v3 ===")
 	DebugLogger.log("Total: %d Restantes: %d" % [straws.size(), get_remaining_count()])
-	var counts := [0, 0, 0]
+	var counts: Array[int] = [0, 0, 0]
 	for s in straws:
 		if not s.is_removed:
 			counts[s.tier] += 1
