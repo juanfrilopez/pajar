@@ -9,6 +9,12 @@ var paja_en_mano: int = 0
 var capacidad_max: int = 15
 var oro: int = 0
 
+# --- Sistema de herramientas y mejoras (tienda / futuro granero) ---
+var cantidad_por_cosecha: int = 1
+var has_guantes: bool = false
+var nivel_bolsa: int = 0 # 0 = 15, 1 = 30, futuro 2=45 etc
+var mejoras_compradas: Array[String] = []
+
 @onready var camera: Camera3D = $Camera3D
 @onready var raycast: RayCast3D = $Camera3D/RayCast3D
 @onready var label_paja: Label = get_node_or_null("../UI/VBoxContainer/LabelPaja")
@@ -92,10 +98,10 @@ func actualizar_mira():
 	if not camera:
 		return
 
-	# Si el raycast está colisionando directamente con la vaca, interactuar con la vaca (no paja detrás)
+	# Si el raycast está colisionando directamente con la vaca o tienda, priorizar eso (no paja detrás)
 	if raycast and raycast.is_colliding():
 		var col = raycast.get_collider()
-		if col and col.is_in_group("vaca"):
+		if col and (col.is_in_group("vaca") or col.is_in_group("tienda")):
 			hebra_apuntada_idx = -1
 			pajar_apuntado = null
 			_set_crosshair_style(-1)
@@ -128,15 +134,16 @@ func _set_crosshair_style(tier: int):
 	if not crosshair:
 		return
 	crosshair.pivot_offset = crosshair.size * 0.5
+	var gloves_mult = cantidad_por_cosecha if cantidad_por_cosecha > 1 else 1.0
 	if tier == 2: # Dorada: dorada brillante y tamaño mayor
 		crosshair.color = Color(1.0, 0.84, 0.0, 1.0)
-		crosshair.scale = Vector2(1.6, 1.6)
+		crosshair.scale = Vector2(1.6, 1.6) * (1.0 + (gloves_mult-1)*0.15)
 	elif tier == 1: # Seca: tono marrón claro / canela
 		crosshair.color = Color(0.85, 0.70, 0.45, 1.0)
-		crosshair.scale = Vector2(1.25, 1.25)
+		crosshair.scale = Vector2(1.25, 1.25) * (1.0 + (gloves_mult-1)*0.15)
 	elif tier == 0: # Común: tono paja suave
 		crosshair.color = Color(0.96, 0.88, 0.70, 1.0)
-		crosshair.scale = Vector2(1.1, 1.1)
+		crosshair.scale = Vector2(1.1, 1.1) * (1.0 + (gloves_mult-1)*0.15)
 	else: # Sin selección / mirando a vaca o entorno
 		crosshair.color = Color(1.0, 1.0, 1.0, 0.8)
 		crosshair.scale = Vector2(1.0, 1.0)
@@ -243,8 +250,13 @@ func actualizar_ui():
 		var valor_total = 0
 		for tipo in inventario_paja:
 			valor_total += inventario_paja[tipo] * paja_tipos[tipo]["valor"]
-		label_paja.text = "Paja: %d / %d\nValor: %d\n[C:%d S:%d D:%d]" % [
-			paja_en_mano, capacidad_max, valor_total,
+		var extra: String = ""
+		if has_guantes:
+			extra += " 🧤x%d" % cantidad_por_cosecha
+		if nivel_bolsa > 0:
+			extra += " 🎒%d" % nivel_bolsa
+		label_paja.text = "Paja: %d / %d%s\nValor: %d\n[C:%d S:%d D:%d]" % [
+			paja_en_mano, capacidad_max, extra, valor_total,
 			inventario_paja.get(0,0), inventario_paja.get(1,0), inventario_paja.get(2,0)
 		]
 		label_oro.text = "Oro: %d" % oro
@@ -278,3 +290,30 @@ func vender_paja_toda_a_vaca() -> int:
 
 func get_spawn_position() -> Vector3:
 	return spawn_position
+
+# --- Métodos de tienda / mejoras ---
+func get_cantidad_cosecha() -> int:
+	return cantidad_por_cosecha
+
+func tiene_guantes() -> bool:
+	return has_guantes
+
+func comprar_guantes():
+	has_guantes = true
+	cantidad_por_cosecha = 3
+	if not "gloves" in mejoras_compradas:
+		mejoras_compradas.append("gloves")
+	DebugLogger.log("¡Guantes comprados! Ahora coges de %d en %d" % cantidad_por_cosecha)
+	actualizar_ui()
+
+func comprar_bolsa(nueva_capacidad: int):
+	if nueva_capacidad > capacidad_max:
+		capacidad_max = nueva_capacidad
+		nivel_bolsa += 1
+		if not ("bag_%d" % nueva_capacidad) in mejoras_compradas:
+			mejoras_compradas.append("bag_%d" % nueva_capacidad)
+		DebugLogger.log("¡Bolsa mejorada! Nueva capacidad: %d" % capacidad_max)
+		actualizar_ui()
+
+func tiene_bolsa_grande() -> bool:
+	return capacidad_max >= 30

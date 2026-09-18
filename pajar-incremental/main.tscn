@@ -5,6 +5,7 @@
 [ext_resource type="Script" uid="uid://cewp3keww1jk4" path="res://jugador.gd" id="3_0xm2m"]
 [ext_resource type="Script" uid="uid://8nndlgdx5kcf" path="res://vaca.gd" id="4_h2yge"]
 [ext_resource type="Script" uid="uid://b4sueloclickpajar1" path="res://suelo_click.gd" id="5_suelo"]
+[ext_resource type="Script" path="res://shop_item.gd" id="6_tienda"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ms7w3"]
 size = Vector2(100, 100)
@@ -47,6 +48,35 @@ roughness = 0.9
 albedo_color = Color(0.8, 0.6, 0.4, 1)
 roughness = 0.8
 
+[sub_resource type="StandardMaterial3D" id="Mat_tienda_guantes"]
+albedo_color = Color(0.55, 0.35, 0.2, 1)
+roughness = 0.85
+
+[sub_resource type="StandardMaterial3D" id="Mat_tienda_bolsa"]
+albedo_color = Color(0.6, 0.45, 0.25, 1)
+roughness = 0.85
+
+[sub_resource type="StandardMaterial3D" id="Mat_guantes"]
+albedo_color = Color(0.2, 0.4, 0.85, 1)
+roughness = 0.6
+metallic = 0.1
+
+[sub_resource type="StandardMaterial3D" id="Mat_bolsa"]
+albedo_color = Color(0.7, 0.55, 0.25, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_tienda"]
+size = Vector3(1.4, 0.9, 1.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_guantes"]
+size = Vector3(0.6, 0.15, 0.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bolsa"]
+size = Vector3(0.7, 0.6, 0.35)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tienda"]
+size = Vector3(1.4, 0.9, 1.0)
+
 [node name="Main" type="Node3D" unique_id=1531693958]
 
 [node name="DebugLogger" parent="." unique_id=999999999 instance=ExtResource("2_logger")]
@@ -79,7 +109,7 @@ text = "Oro: 0"
 [node name="LabelHelp" type="Label" parent="UI/VBoxContainer" unique_id=1314552414]
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
-text = "WASD mover, Mouse mirar, Click paja (hebra o suelo junto al montón) / vaca para vender, Espacio saltar. Sube al montón andando hasta la punta, ESC raton"
+text = "WASD mover, Mouse mirar, Click paja (hebra o suelo) / vaca vender / cajas tienda (guantes 75 oro x3, bolsa 50 oro 30 cap), Espacio saltar. ESC raton"
 
 [node name="ColorRect" type="ColorRect" parent="UI" unique_id=959928594]
 custom_minimum_size = Vector2(6, 6)
@@ -183,3 +213,79 @@ collision_mask = 1
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Vaca/StaticBody3D" unique_id=1513970556]
 shape = SubResource("BoxShape3D_vaca")
+
+[node name="TiendaGuantes" type="MeshInstance3D" parent="." unique_id=900000001]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.6, 0)
+mesh = SubResource("BoxMesh_tienda")
+material_override = SubResource("Mat_tienda_guantes")
+cast_shadow = 1
+
+[node name="StaticBody3D" type="StaticBody3D" parent="TiendaGuantes" unique_id=900000002]
+script = ExtResource("6_tienda")
+collision_layer = 1
+collision_mask = 1
+item_type = "gloves"
+item_name = "Guantes"
+cost = 75
+description = "Coge de 3 en 3"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TiendaGuantes/StaticBody3D" unique_id=900000003]
+shape = SubResource("BoxShape3D_tienda")
+
+[node name="ItemVisual" type="Node3D" parent="TiendaGuantes" unique_id=900000004]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.65, 0)
+
+[node name="GuanteIzq" type="MeshInstance3D" parent="TiendaGuantes/ItemVisual" unique_id=900000005]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.18, 0, 0.05)
+mesh = SubResource("BoxMesh_guantes")
+material_override = SubResource("Mat_guantes")
+cast_shadow = 1
+
+[node name="GuanteDer" type="MeshInstance3D" parent="TiendaGuantes/ItemVisual" unique_id=900000006]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.18, 0, -0.05)
+mesh = SubResource("BoxMesh_guantes")
+material_override = SubResource("Mat_guantes")
+cast_shadow = 1
+
+[node name="LabelPrecio" type="Label3D" parent="TiendaGuantes" unique_id=900000007]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+billboard = 1
+font_size = 96
+modulate = Color(1, 1, 0.8, 1)
+text = "Guantes\n75 Oro\nx3 paja"
+outline_size = 8
+
+[node name="TiendaBolsa" type="MeshInstance3D" parent="." unique_id=910000001]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.6, 3)
+mesh = SubResource("BoxMesh_tienda")
+material_override = SubResource("Mat_tienda_bolsa")
+cast_shadow = 1
+
+[node name="StaticBody3D" type="StaticBody3D" parent="TiendaBolsa" unique_id=910000002]
+script = ExtResource("6_tienda")
+collision_layer = 1
+collision_mask = 1
+item_type = "bag_30"
+item_name = "Bolsa Grande"
+cost = 50
+description = "Capacidad 30"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TiendaBolsa/StaticBody3D" unique_id=910000003]
+shape = SubResource("BoxShape3D_tienda")
+
+[node name="ItemVisual" type="Node3D" parent="TiendaBolsa" unique_id=910000004]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+
+[node name="BolsaMesh" type="MeshInstance3D" parent="TiendaBolsa/ItemVisual" unique_id=910000005]
+mesh = SubResource("BoxMesh_bolsa")
+material_override = SubResource("Mat_bolsa")
+cast_shadow = 1
+
+[node name="LabelPrecio" type="Label3D" parent="TiendaBolsa" unique_id=910000007]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.35, 0)
+billboard = 1
+font_size = 96
+modulate = Color(1, 1, 0.8, 1)
+text = "Bolsa 30\n50 Oro"
+outline_size = 8
+
