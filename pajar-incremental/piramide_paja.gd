@@ -324,12 +324,16 @@ func _verify_straws_are_horizontal() -> void:
 		var samples: int = mini(mm.instance_count, 64)
 		for j in range(samples):
 			var t: Transform3D = mm.get_instance_transform(j)
-			var axis_y: Vector3 = t.basis.get_column(1)
+			# `basis.y` es la COLUMNA 1 de la matriz (equivalente a `basis * Vector3.UP`).
+			# OJO: `Basis.get_column()` existe solo en C++, NO está expuesto a GDScript,
+			# así que llamarlo revienta el parseo del script ("Function not found in base Basis").
+			var axis_y: Vector3 = t.basis.y
 			var len_sq: float = axis_y.length_squared()
 			if len_sq < 1e-10:
 				continue  # instancia oculta
 			var up_ratio: float = absf(axis_y.y) / sqrt(len_sq)
-			var ang: float = rad_to_deg(asinf(clampf(up_ratio, 0.0, 1.0)))
+			# OJO: en Godot no existe `asinf()`, la función es `asin()` (sin sufijo f).
+			var ang: float = rad_to_deg(asin(clampf(up_ratio, 0.0, 1.0)))
 			max_deg = maxf(max_deg, ang)
 			checked += 1
 			if ang > 30.0:
@@ -355,9 +359,13 @@ func _verify_straws_are_horizontal() -> void:
 # encogerse). Este fue el bug que hacía que las pajas se vieran de pie.
 func _straw_transform(data: StrawData) -> Transform3D:
 	var rot: Basis = _straw_basis(data.axis_dir)
-	var col_x: Vector3 = rot.get_column(0) * data.thickness
-	var col_y: Vector3 = rot.get_column(1) * data.length
-	var col_z: Vector3 = rot.get_column(2) * data.thickness
+	# En GDScript, `basis.x/.y/.z` SON las columnas de la matriz (x = columna 0,
+	# y = columna 1, z = columna 2), es decir, a dónde va cada eje local.
+	# Equivalente a `rot * Vector3(1,0,0)` etc. NO usar `rot.get_column(i)`:
+	# ese método es solo de C++ y no existe en GDScript (error de parseo).
+	var col_x: Vector3 = rot.x * data.thickness
+	var col_y: Vector3 = rot.y * data.length
+	var col_z: Vector3 = rot.z * data.thickness
 	return Transform3D(col_x, col_y, col_z, data.position)
 
 func _hide_instance(data: StrawData) -> void:
