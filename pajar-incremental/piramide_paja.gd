@@ -17,7 +17,10 @@ extends Node3D
 #      cobertura del núcleo pasa de ~2% a ~99%: los huecos que quedan son de
 #      sombra, no de "se ve el fondo".
 #   3) FALDA de hebras sueltas alrededor de la base para que no se vea la
-#      costura entre el montón y el suelo.
+#      costura entre el montón y el suelo. La falda y las hebras bajas de la
+#      ladera quedan FUERA de la hitbox del montón, así que el suelo dentro
+#      de la zona de recogida también es clickeable: suelo_click.gd reenvía
+#      esos clics a punto_dentro_de_zona() / hacer_clic() de este script.
 #
 # Geometría del montón (sin cambios): perfil r(f) = base_radius*(1-f)^0.8,
 # cóncavo => sólido CONVEXO => un único ConvexPolygonShape3D para caminar y
@@ -72,6 +75,21 @@ const MOUND_RINGS: int = 15             # Muestras del perfil para la colisión
 const MOUND_SEGS: int = 20              # Muestras radiales para la colisión
 const SETTLE_RADIUS: float = 0.45       # Radio del "asentamiento" al recoger
 const SETTLE_DEPTH: float = 0.02        # Cuánto se hunde la paja vecina (m)
+const ZONA_EXTRA: float = 0.3           # Margen extra de la zona clickeable del suelo
+
+# --- Zona clickeable del suelo alrededor de la base ---
+# La hitbox del montón (ConvexPolygonShape3D) sólo cubre hasta base_radius,
+# pero la falda de hebras sueltas llega hasta base_radius*SKIRT_OUTER y las
+# hebras de la base de la ladera asoman media longitud más allá del borde.
+# Esos clics morían en el suelo sin recoger nada. Para arreglarlo, el suelo
+# (suelo_click.gd) nos reenvía los clics que caen dentro de esta zona y aquí
+# se recoge la hebra más cercana al impacto, igual que en la ladera.
+func punto_dentro_de_zona(world_pos: Vector3) -> bool:
+	var local: Vector3 = to_local(world_pos)
+	if local.y < -0.6 or local.y > 0.6:
+		return false
+	var r_horizontal: float = Vector2(local.x, local.z).length()
+	return r_horizontal <= base_radius * SKIRT_OUTER + STRAW_LEN_MAX * 0.5 + ZONA_EXTRA
 
 enum StrawTier {
 	TIER_1_COMMON = 0,
@@ -144,6 +162,9 @@ var _cdf: PackedFloat32Array = PackedFloat32Array()
 const _pile_click_script = preload("res://pile_click.gd")
 
 func _ready():
+	# suelo_click.gd nos busca por grupo para reenviarnos los clics del suelo
+	add_to_group("pajar")
+
 	if has_node("Straws"):
 		straws_container = $Straws
 	else:

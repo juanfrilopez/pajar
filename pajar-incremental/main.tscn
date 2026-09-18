@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" path="res://debug_logger.tscn" id="2_logger"]
 [ext_resource type="Script" uid="uid://cewp3keww1jk4" path="res://jugador.gd" id="3_0xm2m"]
 [ext_resource type="Script" uid="uid://8nndlgdx5kcf" path="res://vaca.gd" id="4_h2yge"]
+[ext_resource type="Script" uid="uid://b4sueloclickpajar1" path="res://suelo_click.gd" id="5_suelo"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ms7w3"]
 size = Vector2(100, 100)
@@ -78,7 +79,7 @@ text = "Oro: 0"
 [node name="LabelHelp" type="Label" parent="UI/VBoxContainer" unique_id=1314552414]
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
-text = "WASD mover, Mouse mirar, Click hebra/vaca, Espacio saltar. Sube al montón de paja andando hasta la punta, ESC raton"
+text = "WASD mover, Mouse mirar, Click paja (hebra o suelo junto al montón) / vaca para vender, Espacio saltar. Sube al montón andando hasta la punta, ESC raton"
 
 [node name="ColorRect" type="ColorRect" parent="UI" unique_id=959928594]
 custom_minimum_size = Vector2(6, 6)
@@ -102,6 +103,7 @@ mesh = SubResource("PlaneMesh_ms7w3")
 material_override = SubResource("Mat_ground")
 
 [node name="StaticBody3D" type="StaticBody3D" parent="Suelo" unique_id=567446956]
+script = ExtResource("5_suelo")
 collision_layer = 1
 collision_mask = 1
 
