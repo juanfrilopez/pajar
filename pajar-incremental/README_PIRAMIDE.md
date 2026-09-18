@@ -1,3 +1,14 @@
+# Pirámide de Paja v3 — ultrafina, 1900 hebras
+
+Montón procedural con **1900 hebras individuales** (cilindros finos) dibujadas con **MultiMesh** (un draw call por calidad). Un solo `PileCollision` sirve para caminar y para recoger: el clic elige la hebra más cercana al impacto.
+
+- `total_straws`: 1900
+- Grosor: ~0.6–1.4 cm (antes 3.5–7 cm)
+- Tiers: común / seca / dorada
+- Regeneración automática al vaciar el montón
+
+---
+
 # Implementación de Pirámide de Paja Orgánica - Sistema de Recolección con Forma Natural
 
 ## Descripción General

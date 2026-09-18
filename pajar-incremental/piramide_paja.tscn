@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://c8k2p9a1m3n4o5p6"]
 
 [ext_resource type="Script" path="res://piramide_paja.gd" id="1_paja"]
+[ext_resource type="Script" path="res://pile_click.gd" id="2_click"]
 
 [sub_resource type="CylinderShape3D" id="CylinderShape3D_pile"]
 height = 1.8
@@ -8,14 +9,18 @@ radius = 3.0
 
 [node name="PiramidePaja" type="Node3D"]
 script = ExtResource("1_paja")
+total_straws = 1900
+base_radius = 2.5
+pile_height = 1.65
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 
 [node name="Straws" type="Node3D" parent="." unique_id=1001]
 
 [node name="PileCollision" type="StaticBody3D" parent="." unique_id=1002]
+script = ExtResource("2_click")
 collision_layer = 1
 collision_mask = 1
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="PileCollision" unique_id=1003]
 shape = SubResource("CylinderShape3D_pile")
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.825, 0)
