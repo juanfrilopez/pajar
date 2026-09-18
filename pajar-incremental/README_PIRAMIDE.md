@@ -1,10 +1,12 @@
-# Pirámide de Paja v3 — ultrafina, 1900 hebras
+# Montón de Paja v4 — "megamontón" caminable
 
-Montón procedural con **1900 hebras individuales** (cilindros finos) dibujadas con **MultiMesh** (un draw call por calidad). Un solo `PileCollision` sirve para caminar y para recoger: el clic elige la hebra más cercana al impacto.
+Montículo procedural enorme con **18000 hebras cortas y HORIZONTALES** (cilindros finos) dibujadas con **MultiMesh** (un draw call por calidad). Un solo `PileCollision` (hull convexo) sirve para **subir andando** y para recoger: el clic elige la hebra más cercana al impacto.
 
-- `total_straws`: 1900
-- Grosor: ~0.6–1.4 cm (antes 3.5–7 cm)
-- Tiers: común / seca / dorada
+- `total_straws`: 18000 · `base_radius`: 7.5 m · `pile_height`: 3.4 m
+- Hebras cortas: 0.35–0.8 m, tumbadas casi horizontales (±14° del suelo)
+- Perfil del montón: `r(f) = base_radius · (1−f)^0.8` → pendiente base ~29° (el jugador soporta 45°), **se sube andando**, y la punta queda afilada
+- La punta es el sitio reservado para la **aguja** futura
+- Tiers: común / seca / dorada (la dorada se concentra arriba)
 - Regeneración automática al vaciar el montón
 
 ---
