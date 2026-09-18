@@ -128,19 +128,65 @@ class StrawData:
 	var position: Vector3
 	var axis_dir: Vector3  # Dirección del eje de la hebra (≈ tangente a la superficie)
 	var length: float
+	var half_length: float
 	var thickness: float
 	var depth: float       # <0 = fuera de la superficie, >CORE_INSET = enterrada en el núcleo
 	var color: Color
 	var is_removed: bool = false
+	var q0: Vector3        # Extremo inicial del segmento cilíndrico
+	var q1: Vector3        # Extremo final del segmento cilíndrico
+	var last_query_id: int = 0
+
 	func _init(idx: int, t: int, pos: Vector3, axis: Vector3, len_m: float, thick: float, dep: float, col: Color):
 		index = idx
 		tier = t
 		position = pos
 		axis_dir = axis
 		length = len_m
+		half_length = len_m * 0.5
 		thickness = thick
 		depth = dep
 		color = col
+		update_endpoints()
+
+	func update_endpoints() -> void:
+		half_length = length * 0.5
+		q0 = position - axis_dir * half_length
+		q1 = position + axis_dir * half_length
+
+# --- Particionamiento espacial para búsqueda precisa de hebras ---
+const GRID_CELL_SIZE: float = 1.5
+const GRID_MIN: float = -10.5
+const GRID_MAX: float = 10.5
+const GRID_CELLS: int = 14
+
+var _spatial_grid: Array = []
+var _query_id: int = 0
+
+func _init_grid() -> void:
+	_spatial_grid.clear()
+	_spatial_grid.resize(GRID_CELLS * GRID_CELLS)
+	for i in range(_spatial_grid.size()):
+		_spatial_grid[i] = []
+
+func _get_cell_coord(val: float) -> int:
+	return clampi(int(floor((val - GRID_MIN) / GRID_CELL_SIZE)), 0, GRID_CELLS - 1)
+
+func _insert_straw_in_grid(s: StrawData) -> void:
+	var min_x: float = minf(s.q0.x, s.q1.x) - s.thickness
+	var max_x: float = maxf(s.q0.x, s.q1.x) + s.thickness
+	var min_z: float = minf(s.q0.z, s.q1.z) - s.thickness
+	var max_z: float = maxf(s.q0.z, s.q1.z) + s.thickness
+
+	var min_cx: int = _get_cell_coord(min_x)
+	var max_cx: int = _get_cell_coord(max_x)
+	var min_cz: int = _get_cell_coord(min_z)
+	var max_cz: int = _get_cell_coord(max_z)
+
+	for cz in range(min_cz, max_cz + 1):
+		var row: int = cz * GRID_CELLS
+		for cx in range(min_cx, max_cx + 1):
+			_spatial_grid[row + cx].append(s.index)
 
 var straws: Array[StrawData] = []
 var straws_container: Node3D
@@ -538,6 +584,8 @@ func _sync_pile_collision() -> void:
 
 func clear_pile():
 	straws.clear()
+	for c in range(_spatial_grid.size()):
+		_spatial_grid[c].clear()
 	for mm in _mms:
 		if mm:
 			mm.instance_count = 0
@@ -551,6 +599,7 @@ func generate_pile():
 
 	_ensure_core()
 	_build_area_cdf()
+	_init_grid()
 
 	straws = []
 	var buckets: Array = [[], [], []]
@@ -580,6 +629,7 @@ func generate_pile():
 		var data: StrawData = StrawData.new(i, tier, pos, axis, length, thickness, depth, varied)
 		straws.append(data)
 		buckets[tier].append(data)
+		_insert_straw_in_grid(data)
 
 	_fill_multimeshes(buckets)
 	_sync_pile_collision()
@@ -734,7 +784,197 @@ func determine_tier_by_height(ratio: float) -> int:
 		else:
 			return StrawTier.TIER_3_GOLDEN
 
-# ---------- Recoleccion ----------
+# ---------- Recolección y Selección con Mira ----------
+
+# Distancia mínima 3D entre un rayo (O + D*s, s en [0, s_max]) y el segmento de la hebra (C + A*t, t en [-half_len, half_len]).
+# D y A son vectores unitarios.
+# Devuelve [dist, s, t]:
+#   dist: distancia euclídea entre la línea de visión y el eje de la hebra
+#   s: distancia a lo largo del rayo desde la cámara (profundidad visual)
+#   t: posición a lo largo de la hebra [-half_len, half_len]
+func _ray_straw_closest(O: Vector3, D: Vector3, C: Vector3, A: Vector3, half_len: float, s_max: float) -> Array:
+	var w0: Vector3 = O - C
+	var b: float = D.dot(A)
+	var d: float = D.dot(w0)
+	var e: float = A.dot(w0)
+	var denom: float = 1.0 - b * b
+	var s: float = 0.0
+	var t: float = 0.0
+	if denom < 1e-6:
+		t = clampf(e, -half_len, half_len)
+		s = clampf(t * b - d, 0.0, s_max)
+		t = clampf(e + s * b, -half_len, half_len)
+	else:
+		var s_raw: float = (b * e - d) / denom
+		var t_raw: float = (e - b * d) / denom
+		t = clampf(t_raw, -half_len, half_len)
+		s = clampf(t * b - d, 0.0, s_max)
+		t = clampf(e + s * b, -half_len, half_len)
+	var P: Vector3 = O + D * s
+	var Q: Vector3 = C + A * t
+	var dist: float = P.distance_to(Q)
+	return [dist, s, t]
+
+func _collect_candidate_straws(local_cam_pos: Vector3, local_cam_dir: Vector3, local_hit: Vector3, max_reach: float) -> Array[StrawData]:
+	_query_id += 1
+	var candidates: Array[StrawData] = []
+	if _spatial_grid.is_empty():
+		return candidates
+
+	if local_hit != Vector3.ZERO:
+		var search_rad: float = 1.8
+		var min_cx: int = _get_cell_coord(local_hit.x - search_rad)
+		var max_cx: int = _get_cell_coord(local_hit.x + search_rad)
+		var min_cz: int = _get_cell_coord(local_hit.z - search_rad)
+		var max_cz: int = _get_cell_coord(local_hit.z + search_rad)
+		for cz in range(min_cz, max_cz + 1):
+			var row: int = cz * GRID_CELLS
+			for cx in range(min_cx, max_cx + 1):
+				var cell: Array = _spatial_grid[row + cx]
+				for idx in cell:
+					var s: StrawData = straws[idx]
+					if s.last_query_id != _query_id:
+						s.last_query_id = _query_id
+						if not s.is_removed:
+							candidates.append(s)
+	else:
+		var step_size: float = 1.0
+		var num_steps: int = maxi(1, int(ceil(max_reach / step_size)))
+		for step in range(num_steps + 1):
+			var t: float = minf(float(step) * step_size, max_reach)
+			var pt: Vector3 = local_cam_pos + local_cam_dir * t
+			if pt.x * pt.x + pt.z * pt.z > 120.0:
+				continue
+			var cx_center: int = _get_cell_coord(pt.x)
+			var cz_center: int = _get_cell_coord(pt.z)
+			var min_cx: int = maxi(0, cx_center - 1)
+			var max_cx: int = mini(GRID_CELLS - 1, cx_center + 1)
+			var min_cz: int = maxi(0, cz_center - 1)
+			var max_cz: int = mini(GRID_CELLS - 1, cz_center + 1)
+			for cz in range(min_cz, max_cz + 1):
+				var row: int = cz * GRID_CELLS
+				for cx in range(min_cx, max_cx + 1):
+					var cell: Array = _spatial_grid[row + cx]
+					for idx in cell:
+						var s: StrawData = straws[idx]
+						if s.last_query_id != _query_id:
+							s.last_query_id = _query_id
+							if not s.is_removed:
+								candidates.append(s)
+	return candidates
+
+func _find_closest_straw_to_point(candidates: Array[StrawData], local_pos: Vector3) -> int:
+	var best_idx: int = -1
+	var best_dist: float = 1e9
+	for s in candidates:
+		if s.depth > CORE_INSET + 0.02:
+			continue
+		var seg_v: Vector3 = s.q1 - s.q0
+		var seg_len_sq: float = seg_v.length_squared()
+		var d: float = 0.0
+		if seg_len_sq < 1e-8:
+			d = local_pos.distance_to(s.position)
+		else:
+			var t: float = clampf((local_pos - s.q0).dot(seg_v) / seg_len_sq, 0.0, 1.0)
+			var proj: Vector3 = s.q0 + seg_v * t
+			d = local_pos.distance_to(proj)
+		if d < best_dist:
+			best_dist = d
+			best_idx = s.index
+	return best_idx
+
+# Encuentra la hebra exacta apuntada por la mira de la cámara.
+# Devuelve el índice en straws[], o -1 si no hay ninguna.
+func find_straw_under_crosshair(cam_origin: Vector3, cam_dir: Vector3, hit_pos: Vector3 = Vector3.ZERO, max_reach: float = 5.5) -> int:
+	var local_cam_pos: Vector3 = to_local(cam_origin)
+	var local_cam_dir: Vector3 = (to_local(cam_origin + cam_dir) - local_cam_pos).normalized()
+	var local_hit: Vector3 = Vector3.ZERO
+	if hit_pos != Vector3.ZERO:
+		local_hit = to_local(hit_pos)
+		var hit_reach: float = local_cam_pos.distance_to(local_hit) + 0.6
+		if hit_reach < max_reach:
+			max_reach = hit_reach
+
+	var candidates: Array[StrawData] = _collect_candidate_straws(local_cam_pos, local_cam_dir, local_hit, max_reach)
+	if candidates.is_empty():
+		return -1
+
+	var best_direct_idx: int = -1
+	var best_direct_cam_dist: float = 1e9
+	var best_direct_ray_dist: float = 1e9
+
+	var best_assist_idx: int = -1
+	var best_assist_score: float = 1e9
+
+	const DIRECT_TOLERANCE: float = 0.003 # 3 mm de margen sobre el radio cilíndrico
+	const MAX_ASSIST_DIST: float = 0.08   # 8 cm para asistencia si la mira pasa muy cerca
+	const MAX_BURIED_DEPTH: float = CORE_INSET + 0.015
+
+	for s in candidates:
+		if s.depth > MAX_BURIED_DEPTH:
+			continue
+
+		var res: Array = _ray_straw_closest(local_cam_pos, local_cam_dir, s.position, s.axis_dir, s.half_length, max_reach)
+		var ray_dist: float = res[0]
+		var cam_dist: float = res[1]
+
+		if cam_dist >= max_reach:
+			continue
+
+		var hit_radius: float = s.thickness + DIRECT_TOLERANCE
+		if ray_dist <= hit_radius:
+			# Hebra directamente atravesada por la línea de visión:
+			# Priorizar la que está en primer término (menor cam_dist).
+			# Si dos hebras están prácticamente a la misma distancia (dentro de 2 cm),
+			# la que esté más centrada respecto al retículo gana.
+			if cam_dist < best_direct_cam_dist - 0.02:
+				best_direct_cam_dist = cam_dist
+				best_direct_ray_dist = ray_dist
+				best_direct_idx = s.index
+			elif absf(cam_dist - best_direct_cam_dist) <= 0.02:
+				if ray_dist < best_direct_ray_dist:
+					best_direct_cam_dist = cam_dist
+					best_direct_ray_dist = ray_dist
+					best_direct_idx = s.index
+		elif best_direct_idx == -1 and ray_dist <= MAX_ASSIST_DIST:
+			var assist_score: float = ray_dist * 10.0 + cam_dist * 0.1
+			if assist_score < best_assist_score:
+				best_assist_score = assist_score
+				best_assist_idx = s.index
+
+	if best_direct_idx != -1:
+		return best_direct_idx
+	if best_assist_idx != -1:
+		return best_assist_idx
+
+	if local_hit != Vector3.ZERO:
+		return _find_closest_straw_to_point(candidates, local_hit)
+
+	return -1
+
+# Devuelve [straw_index, tier] para la hebra seleccionada por la mira, o [-1, -1]
+func obtener_hebra_bajo_mira(cam_origin: Vector3, cam_dir: Vector3, hit_pos: Vector3 = Vector3.ZERO, max_reach: float = 5.5) -> Array:
+	var idx: int = find_straw_under_crosshair(cam_origin, cam_dir, hit_pos, max_reach)
+	if idx >= 0 and idx < straws.size():
+		var s: StrawData = straws[idx]
+		if not s.is_removed:
+			return [idx, s.tier]
+	return [-1, -1]
+
+# Clic directo con la mira cuando no hay colisión física (por ejemplo, en la silueta)
+func intentar_coger_con_mira(jugador) -> bool:
+	if not jugador or not is_instance_valid(jugador):
+		return false
+	var cam = jugador.camera if "camera" in jugador else null
+	if not cam or not is_instance_valid(cam):
+		return false
+	var cam_pos: Vector3 = cam.global_position
+	var cam_dir: Vector3 = -cam.global_transform.basis.z.normalized()
+	var idx: int = find_straw_under_crosshair(cam_pos, cam_dir, Vector3.ZERO, 5.5)
+	if idx >= 0 and idx < straws.size():
+		try_pick_straw(idx, jugador)
+		return true
+	return false
 
 func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 	if index < 0 or index >= straws.size():
@@ -744,7 +984,8 @@ func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 		return
 
 	if jugador.paja_en_mano >= jugador.capacidad_max:
-		crear_texto_flotante("¡Mano llena!", Color.RED)
+		var warn_pos: Vector3 = to_global(data.position)
+		crear_texto_flotante("¡Mano llena!", Color.RED, warn_pos)
 		return
 
 	var agregado: bool = false
@@ -758,7 +999,8 @@ func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 				jugador.actualizar_ui()
 
 	if not agregado:
-		crear_texto_flotante("¡Mano llena!", Color.RED)
+		var warn_pos: Vector3 = to_global(data.position)
+		crear_texto_flotante("¡Mano llena!", Color.RED, warn_pos)
 		return
 
 	data.is_removed = true
@@ -766,7 +1008,8 @@ func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 	animar_recoleccion_hebra(data)
 
 	var tier_info: Dictionary = STRAW_TIERS[data.tier]
-	crear_texto_flotante("+1 %s" % tier_info["name"], tier_info["color"])
+	var text_world_pos: Vector3 = to_global(data.position)
+	crear_texto_flotante("+1 %s" % tier_info["name"], tier_info["color"], text_world_pos)
 
 	var remaining: int = get_remaining_count()
 	if remaining == 0 and auto_regenerate:
@@ -790,7 +1033,27 @@ func get_remaining_count() -> int:
 # Se hunde siguiendo la NORMAL de la superficie, no en vertical, para que la
 # costra no se descuelgue del núcleo.
 func _apply_settle_effect(removed_pos: Vector3) -> void:
-	for s in straws:
+	var candidates: Array[StrawData] = []
+	if not _spatial_grid.is_empty():
+		var min_cx: int = _get_cell_coord(removed_pos.x - SETTLE_RADIUS)
+		var max_cx: int = _get_cell_coord(removed_pos.x + SETTLE_RADIUS)
+		var min_cz: int = _get_cell_coord(removed_pos.z - SETTLE_RADIUS)
+		var max_cz: int = _get_cell_coord(removed_pos.z + SETTLE_RADIUS)
+		_query_id += 1
+		for cz in range(min_cz, max_cz + 1):
+			var row: int = cz * GRID_CELLS
+			for cx in range(min_cx, max_cx + 1):
+				var cell: Array = _spatial_grid[row + cx]
+				for idx in cell:
+					var s: StrawData = straws[idx]
+					if s.last_query_id != _query_id:
+						s.last_query_id = _query_id
+						if not s.is_removed:
+							candidates.append(s)
+	else:
+		candidates = straws
+
+	for s in candidates:
 		if s.is_removed:
 			continue
 		var dist: float = s.position.distance_to(removed_pos)
@@ -804,6 +1067,7 @@ func _apply_settle_effect(removed_pos: Vector3) -> void:
 		if s.position.y < 0.005:
 			s.position.y = 0.005
 		s.depth += sink
+		s.update_endpoints()
 		_sync_instance(s)
 
 func animar_recoleccion_hebra(data: StrawData):
@@ -820,6 +1084,15 @@ func animar_recoleccion_hebra(data: StrawData):
 	tween.chain().tween_callback(node.queue_free)
 
 func hacer_clic(jugador, hit_pos: Vector3 = Vector3.ZERO):
+	var cam = jugador.camera if (jugador and "camera" in jugador) else null
+	if cam and is_instance_valid(cam):
+		var cam_pos: Vector3 = cam.global_position
+		var cam_dir: Vector3 = -cam.global_transform.basis.z.normalized()
+		var picked_idx: int = find_straw_under_crosshair(cam_pos, cam_dir, hit_pos, 5.5)
+		if picked_idx != -1:
+			try_pick_straw(picked_idx, jugador, hit_pos)
+			return
+
 	if hit_pos != Vector3.ZERO:
 		var closest_idx: int = find_closest_straw(hit_pos)
 		if closest_idx != -1:
@@ -834,6 +1107,26 @@ func hacer_clic(jugador, hit_pos: Vector3 = Vector3.ZERO):
 
 func find_closest_straw(world_pos: Vector3) -> int:
 	var local_pos: Vector3 = to_local(world_pos)
+	if not _spatial_grid.is_empty():
+		var min_cx: int = _get_cell_coord(local_pos.x - 2.0)
+		var max_cx: int = _get_cell_coord(local_pos.x + 2.0)
+		var min_cz: int = _get_cell_coord(local_pos.z - 2.0)
+		var max_cz: int = _get_cell_coord(local_pos.z + 2.0)
+		_query_id += 1
+		var candidates: Array[StrawData] = []
+		for cz in range(min_cz, max_cz + 1):
+			var row: int = cz * GRID_CELLS
+			for cx in range(min_cx, max_cx + 1):
+				var cell: Array = _spatial_grid[row + cx]
+				for idx in cell:
+					var s: StrawData = straws[idx]
+					if s.last_query_id != _query_id:
+						s.last_query_id = _query_id
+						if not s.is_removed:
+							candidates.append(s)
+		if not candidates.is_empty():
+			return _find_closest_straw_to_point(candidates, local_pos)
+
 	var best_idx: int = -1
 	var best_score: float = 1e9
 	for i in range(straws.size()):
@@ -841,7 +1134,6 @@ func find_closest_straw(world_pos: Vector3) -> int:
 		if s.is_removed:
 			continue
 		var d: float = s.position.distance_to(local_pos)
-		# Penaliza la paja enterrada en el núcleo: se recoge lo que se ve.
 		var score: float = d + maxf(0.0, s.depth - CORE_INSET) * 0.75
 		if score < best_score:
 			best_score = score
@@ -864,19 +1156,22 @@ func get_exposed_straws() -> Array:
 				exposed.append(i)
 	return exposed
 
-func crear_texto_flotante(texto: String, color: Color):
+func crear_texto_flotante(texto: String, color: Color, world_pos: Vector3 = Vector3.ZERO):
 	var label: Label3D = Label3D.new()
 	label.text = texto
 	label.font_size = 48
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.modulate = color
 	label.no_depth_test = false
-	label.position = Vector3(randf_range(-0.5, 0.5), pile_height + 1.0 + randf_range(0, 0.5), randf_range(-0.5, 0.5))
-	add_child(label)
+	if world_pos != Vector3.ZERO:
+		label.global_position = world_pos + Vector3(0, 0.35, 0)
+	else:
+		label.global_position = global_position + Vector3(randf_range(-0.5, 0.5), pile_height + 1.0 + randf_range(0, 0.5), randf_range(-0.5, 0.5))
+	get_tree().current_scene.add_child(label)
 	var tween: Tween = get_tree().create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(label, "position:y", label.position.y + 1.2, 0.8)
-	tween.tween_property(label, "modulate:a", 0.0, 0.8)
+	tween.tween_property(label, "global_position:y", label.global_position.y + 0.9, 0.6)
+	tween.tween_property(label, "modulate:a", 0.0, 0.6)
 	tween.chain().tween_callback(label.queue_free)
 
 func debug_info():
