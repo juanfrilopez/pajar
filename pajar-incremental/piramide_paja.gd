@@ -961,6 +961,123 @@ func obtener_hebra_bajo_mira(cam_origin: Vector3, cam_dir: Vector3, hit_pos: Vec
 			return [idx, s.tier]
 	return [-1, -1]
 
+# ---------- Sistema de cosecha mejorada (guantes) ----------
+func _get_cosecha_cantidad(jugador) -> int:
+	if jugador and jugador.has_method("get_cantidad_cosecha"):
+		return jugador.get_cantidad_cosecha()
+	if jugador and "cantidad_por_cosecha" in jugador:
+		return jugador.cantidad_por_cosecha
+	return 1
+
+# Coge varias hebras alrededor de un punto local. Devuelve cuántas se cogieron.
+func try_pick_multiple_around(jugador, center_local: Vector3, cantidad: int) -> int:
+	if cantidad <= 0:
+		return 0
+	if jugador.paja_en_mano >= jugador.capacidad_max:
+		crear_texto_flotante("¡Mano llena!", Color.RED, to_global(center_local))
+		return 0
+
+	# Recoger candidatos cerca del centro
+	var candidates: Array[StrawData] = []
+	var search_rad: float = 1.2 + (cantidad - 1) * 0.25
+	if _spatial_grid.is_empty():
+		candidates = straws.duplicate()
+	else:
+		_query_id += 1
+		var min_cx: int = _get_cell_coord(center_local.x - search_rad)
+		var max_cx: int = _get_cell_coord(center_local.x + search_rad)
+		var min_cz: int = _get_cell_coord(center_local.z - search_rad)
+		var max_cz: int = _get_cell_coord(center_local.z + search_rad)
+		for cz in range(min_cz, max_cz + 1):
+			var row: int = cz * GRID_CELLS
+			if row < 0 or row >= GRID_CELLS * GRID_CELLS:
+				continue
+			for cx in range(min_cx, max_cx + 1):
+				if cx < 0 or cx >= GRID_CELLS:
+					continue
+				var cell_idx: int = row + cx
+				if cell_idx < 0 or cell_idx >= _spatial_grid.size():
+					continue
+				var cell: Array = _spatial_grid[cell_idx]
+				for idx in cell:
+					var s: StrawData = straws[idx]
+					if s.last_query_id != _query_id:
+						s.last_query_id = _query_id
+						if not s.is_removed:
+							candidates.append(s)
+		if candidates.is_empty():
+			for s in straws:
+				if not s.is_removed:
+					candidates.append(s)
+
+	# Ordenar por cercanía al centro
+	candidates.sort_custom(func(a, b): return a.position.distance_squared_to(center_local) < b.position.distance_squared_to(center_local))
+
+	var picked: int = 0
+	var picked_tiers: Dictionary = {}
+	var last_world_pos: Vector3 = to_global(center_local)
+
+	for s in candidates:
+		if picked >= cantidad:
+			break
+		if s.is_removed:
+			continue
+		if s.depth > CORE_INSET + 0.02:
+			continue
+		if jugador.paja_en_mano >= jugador.capacidad_max:
+			break
+		var agregado: bool = false
+		if jugador.has_method("agregar_paja"):
+			agregado = jugador.agregar_paja(s.tier, 1)
+		else:
+			if jugador.paja_en_mano < jugador.capacidad_max:
+				jugador.paja_en_mano += 1
+				agregado = true
+				if jugador.has_method("actualizar_ui"):
+					jugador.actualizar_ui()
+		if not agregado:
+			break
+		s.is_removed = true
+		_hide_instance(s)
+		animar_recoleccion_hebra(s)
+		picked += 1
+		last_world_pos = to_global(s.position)
+		picked_tiers[s.tier] = picked_tiers.get(s.tier, 0) + 1
+
+	if picked > 0:
+		if picked_tiers.size() == 1:
+			var tier: int = picked_tiers.keys()[0]
+			var tier_info: Dictionary = STRAW_TIERS[tier]
+			if picked == 1:
+				crear_texto_flotante("+1 %s" % tier_info["name"], tier_info["color"], last_world_pos)
+			else:
+				crear_texto_flotante("+%d %s 🧤" % [picked, tier_info["name"]], tier_info["color"], last_world_pos)
+		else:
+			crear_texto_flotante("+%d Paja 🧤" % picked, Color(0.6, 1.0, 0.6), last_world_pos)
+
+		var remaining: int = get_remaining_count()
+		if remaining == 0 and auto_regenerate:
+			if not is_regenerating:
+				is_regenerating = true
+				await get_tree().create_timer(regenerate_delay).timeout
+				is_regenerating = false
+				generate_pile()
+				crear_texto_flotante("¡Montón renovado!", Color.GREEN)
+		elif remaining > 0:
+			_apply_settle_effect(center_local)
+	else:
+		if jugador.paja_en_mano >= jugador.capacidad_max:
+			crear_texto_flotante("¡Mano llena!", Color.RED, to_global(center_local))
+	return picked
+
+func _try_pick_single(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO) -> int:
+	if index < 0 or index >= straws.size():
+		return 0
+	var data: StrawData = straws[index]
+	if data.is_removed:
+		return 0
+	return try_pick_multiple_around(jugador, data.position, 1)
+
 # Clic directo con la mira cuando no hay colisión física (por ejemplo, en la silueta)
 func intentar_coger_con_mira(jugador) -> bool:
 	if not jugador or not is_instance_valid(jugador):
@@ -972,55 +1089,29 @@ func intentar_coger_con_mira(jugador) -> bool:
 	var cam_dir: Vector3 = -cam.global_transform.basis.z.normalized()
 	var idx: int = find_straw_under_crosshair(cam_pos, cam_dir, Vector3.ZERO, 5.5)
 	if idx >= 0 and idx < straws.size():
-		try_pick_straw(idx, jugador)
+		var cantidad: int = _get_cosecha_cantidad(jugador)
+		if cantidad <= 1:
+			_try_pick_single(idx, jugador)
+		else:
+			var center: Vector3 = straws[idx].position
+			try_pick_multiple_around(jugador, center, cantidad)
 		return true
 	return false
 
-func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
+func try_pick_straw(index: int, jugador, hit_pos: Vector3 = Vector3.ZERO):
 	if index < 0 or index >= straws.size():
 		return
-	var data: StrawData = straws[index]
-	if data.is_removed:
+	var cantidad: int = _get_cosecha_cantidad(jugador)
+	if cantidad <= 1:
+		_try_pick_single(index, jugador, hit_pos)
 		return
-
-	if jugador.paja_en_mano >= jugador.capacidad_max:
-		var warn_pos: Vector3 = to_global(data.position)
-		crear_texto_flotante("¡Mano llena!", Color.RED, warn_pos)
-		return
-
-	var agregado: bool = false
-	if jugador.has_method("agregar_paja"):
-		agregado = jugador.agregar_paja(data.tier, 1)
+	# Con guantes: coger varias alrededor del punto
+	var center_local: Vector3
+	if hit_pos != Vector3.ZERO:
+		center_local = to_local(hit_pos)
 	else:
-		if jugador.paja_en_mano < jugador.capacidad_max:
-			jugador.paja_en_mano += 1
-			agregado = true
-			if jugador.has_method("actualizar_ui"):
-				jugador.actualizar_ui()
-
-	if not agregado:
-		var warn_pos: Vector3 = to_global(data.position)
-		crear_texto_flotante("¡Mano llena!", Color.RED, warn_pos)
-		return
-
-	data.is_removed = true
-	_hide_instance(data)
-	animar_recoleccion_hebra(data)
-
-	var tier_info: Dictionary = STRAW_TIERS[data.tier]
-	var text_world_pos: Vector3 = to_global(data.position)
-	crear_texto_flotante("+1 %s" % tier_info["name"], tier_info["color"], text_world_pos)
-
-	var remaining: int = get_remaining_count()
-	if remaining == 0 and auto_regenerate:
-		if not is_regenerating:
-			is_regenerating = true
-			await get_tree().create_timer(regenerate_delay).timeout
-			is_regenerating = false
-			generate_pile()
-			crear_texto_flotante("¡Montón renovado!", Color.GREEN)
-	elif remaining > 0:
-		_apply_settle_effect(data.position)
+		center_local = straws[index].position
+	try_pick_multiple_around(jugador, center_local, cantidad)
 
 func get_remaining_count() -> int:
 	var c: int = 0
