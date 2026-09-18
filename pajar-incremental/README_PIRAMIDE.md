@@ -32,7 +32,11 @@ La v5 cambia el enfoque. La paja no rellena un volumen: forma una **costra** sob
 
 - `base_radius`: 7.5 m · `pile_height`: 3.4 m · perfil cóncavo → sólido **convexo** →
   un único `ConvexPolygonShape3D`: se **sube andando** (pendiente base ~29°, el
-  jugador soporta 45°) y el clic recoge la hebra más cercana al impacto.
+  jugador soporta 45°).
+- **Recogida ultra-precisa con mira**: cálculo ray-segment 3D con aceleración por rejilla
+  espacial. Al apuntar a una hebra con la mira, el retículo cambia de color según la
+  calidad (dorado para paja dorada, tostado para seca, claro para común) y al hacer clic
+  se recoge con total exactitud esa misma hebra y no otra vecina.
 - **Toda la paja es cogible**: la falda y las hebras bajas de la ladera quedan fuera
   de la hitbox del montón, así que el suelo dentro de la zona de recogida
   (`suelo_click.gd`) reenvía el clic al montón, que recoge la hebra más cercana al

@@ -13,6 +13,10 @@ var oro: int = 0
 @onready var raycast: RayCast3D = $Camera3D/RayCast3D
 @onready var label_paja: Label = get_node_or_null("../UI/VBoxContainer/LabelPaja")
 @onready var label_oro: Label = get_node_or_null("../UI/VBoxContainer/LabelOro")
+@onready var crosshair: ColorRect = get_node_or_null("../UI/ColorRect")
+
+var hebra_apuntada_idx: int = -1
+var pajar_apuntado: Node = null
 
 var gravity: float = 9.8
 var spawn_position: Vector3 = Vector3(0, 1.5, 0)
@@ -54,16 +58,22 @@ func _ready():
 	if raycast:
 		raycast.enabled = true
 		raycast.collision_mask = 3 # 1 = mundo/vaca, 2 = paja
-		raycast.target_position = Vector3(0, 0, -4.5)
+		raycast.target_position = Vector3(0, 0, -5.5)
 	
 	DebugLogger.log("Jugador iniciado en %s" % str(spawn_position))
 	actualizar_ui()
+
+func _process(_delta):
+	actualizar_mira()
 
 func _unhandled_input(event):
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
 		camera.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
 		camera.rotation.x = clamp(camera.rotation.x, deg_to_rad(-85), deg_to_rad(85))
+		if raycast:
+			raycast.force_raycast_update()
+		actualizar_mira()
 	
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		# Interaccion por click
@@ -75,22 +85,90 @@ func _unhandled_input(event):
 		else:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-func try_interact():
-	if not raycast:
+func actualizar_mira():
+	if not crosshair:
+		crosshair = get_node_or_null("../UI/ColorRect")
+
+	if not camera:
 		return
-	if raycast.is_colliding():
+
+	# Si el raycast está colisionando directamente con la vaca, interactuar con la vaca (no paja detrás)
+	if raycast and raycast.is_colliding():
+		var col = raycast.get_collider()
+		if col and col.is_in_group("vaca"):
+			hebra_apuntada_idx = -1
+			pajar_apuntado = null
+			_set_crosshair_style(-1)
+			return
+
+	var cam_pos: Vector3 = camera.global_position
+	var cam_dir: Vector3 = -camera.global_transform.basis.z.normalized()
+	var hit_pos: Vector3 = Vector3.ZERO
+	if raycast and raycast.is_colliding():
+		hit_pos = raycast.get_collision_point()
+
+	var found_pile: Node = null
+	var found_idx: int = -1
+	var found_tier: int = -1
+
+	for pile in get_tree().get_nodes_in_group("pajar"):
+		if pile.has_method("obtener_hebra_bajo_mira"):
+			var info = pile.obtener_hebra_bajo_mira(cam_pos, cam_dir, hit_pos, 5.5)
+			if info is Array and info.size() >= 2 and info[0] != -1:
+				found_pile = pile
+				found_idx = info[0]
+				found_tier = info[1]
+				break
+
+	hebra_apuntada_idx = found_idx
+	pajar_apuntado = found_pile
+	_set_crosshair_style(found_tier)
+
+func _set_crosshair_style(tier: int):
+	if not crosshair:
+		return
+	crosshair.pivot_offset = crosshair.size * 0.5
+	if tier == 2: # Dorada: dorada brillante y tamaño mayor
+		crosshair.color = Color(1.0, 0.84, 0.0, 1.0)
+		crosshair.scale = Vector2(1.6, 1.6)
+	elif tier == 1: # Seca: tono marrón claro / canela
+		crosshair.color = Color(0.85, 0.70, 0.45, 1.0)
+		crosshair.scale = Vector2(1.25, 1.25)
+	elif tier == 0: # Común: tono paja suave
+		crosshair.color = Color(0.96, 0.88, 0.70, 1.0)
+		crosshair.scale = Vector2(1.1, 1.1)
+	else: # Sin selección / mirando a vaca o entorno
+		crosshair.color = Color(1.0, 1.0, 1.0, 0.8)
+		crosshair.scale = Vector2(1.0, 1.0)
+
+func try_interact():
+	if raycast:
+		raycast.force_raycast_update()
+	actualizar_mira()
+
+	# 1. Si la mira está seleccionando una hebra exacta del montón:
+	if pajar_apuntado and is_instance_valid(pajar_apuntado) and hebra_apuntada_idx != -1:
+		if pajar_apuntado.has_method("try_pick_straw"):
+			var hit_pt: Vector3 = raycast.get_collision_point() if (raycast and raycast.is_colliding()) else Vector3.ZERO
+			pajar_apuntado.try_pick_straw(hebra_apuntada_idx, self, hit_pt)
+			actualizar_mira()
+			return
+
+	# 2. Si el raycast está colisionando con algo interactuable (vaca, colisión del montón, suelo):
+	if raycast and raycast.is_colliding():
 		var collider = raycast.get_collider()
 		var hit_pos = raycast.get_collision_point()
 		if collider and collider.has_method("hacer_clic"):
-			# Pasar jugador y posicion de impacto
-			if collider.has_method("hacer_clic"):
-				# Intentar con 2 args, si falla con 1
-				var args = collider.get_method_list()
-				# Simplemente llamar con 2 args, GDScript permite default
-				collider.hacer_clic(self, hit_pos)
-	else:
-		# Debug: no colision
-		pass
+			collider.hacer_clic(self, hit_pos)
+			actualizar_mira()
+			return
+
+	# 3. Si la hebra asoma fuera de la colisión física contra el cielo dentro del alcance:
+	for pile in get_tree().get_nodes_in_group("pajar"):
+		if pile.has_method("intentar_coger_con_mira"):
+			if pile.intentar_coger_con_mira(self):
+				actualizar_mira()
+				return
 
 func _physics_process(delta):
 	# Reset si caida al infinito
