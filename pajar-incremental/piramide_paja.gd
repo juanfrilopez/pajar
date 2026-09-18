@@ -192,16 +192,19 @@ func _interior_position() -> Vector3:
 	var y: float = clampf(f * pile_height + randf_range(-0.02, 0.02), 0.02, pile_height)
 	return Vector3(cos(angle) * r, y, sin(angle) * r)
 
-# Base ortogonal cuyo eje Y apunta a la dirección del eje de la hebra
+# Base ortogonal cuyo eje Y apunta a la dirección del eje de la hebra.
+# Construida con Basis(axis, angle) (constructor eje-ángulo, disponible desde
+# Godot 4.0) en vez de set_columns(), que no está expuesto en todas las
+# versiones. La rotación lleva +Y exactamente a `axis`, así que el cilindro
+# queda alineado con la dirección de la hebra.
 func _straw_basis(axis: Vector3) -> Basis:
-	var x_axis: Vector3 = axis.cross(Vector3.UP)
-	if x_axis.length_squared() < 0.0001:
-		x_axis = Vector3.RIGHT
-	x_axis = x_axis.normalized()
-	var z_axis: Vector3 = x_axis.cross(axis)
-	var b: Basis = Basis()
-	b.set_columns(x_axis, axis, z_axis)
-	return b
+	var d: float = clampf(Vector3.UP.dot(axis), -1.0, 1.0)
+	if d > 0.999999:
+		return Basis()  # axis == +Y: sin rotación
+	if d < -0.999999:
+		return Basis(Vector3.RIGHT, PI)  # axis == -Y: media vuelta sobre X
+	var rot_axis: Vector3 = Vector3.UP.cross(axis).normalized()
+	return Basis(rot_axis, acos(d))
 
 # Puntos para el hull convexo del montón (perfil cóncavo => sólido convexo)
 func _build_mound_points() -> PackedVector3Array:
