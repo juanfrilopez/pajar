@@ -5,10 +5,12 @@
 
 [node name="PiramidePaja" type="Node3D"]
 script = ExtResource("1_paja")
-total_straws = 18000
+total_straws = 50000
 base_radius = 7.5
 pile_height = 3.4
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+
+[node name="MoundCore" type="MeshInstance3D" parent="." unique_id=1004]
 
 [node name="Straws" type="Node3D" parent="." unique_id=1001]
 

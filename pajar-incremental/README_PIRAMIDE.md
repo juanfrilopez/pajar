@@ -1,4 +1,62 @@
-# Montón de Paja v4 — "megamontón" caminable
+# Montón de Paja v5 — paja MACIZA: núcleo opaco + costra de hebras
+
+El problema de la v4: las 18.000 hebras se repartían por el **volumen** del montón
+(~231 m³) y sólo rellenaban el **1,5 %** de ese volumen. Resultado: se veía el cielo
+y el suelo **a través de la paja**, porque entre hebra y hebra no había nada.
+La paja real no se comporta así: un montón de paja es opaco.
+
+La v5 cambia el enfoque. La paja no rellena un volumen: forma una **costra** sobre un
+**núcleo macizo**.
+
+![Antes y después](../docs/comparativa_antes_despues_simulacion.jpg)
+*(Simulación offline del mismo algoritmo —no una captura de Godot— usada para medir el
+"se ve a través": 35 % de la silueta del montón antes, 0 % ahora.)*
+
+## Cómo se consigue que no se vea ni un hueco
+
+1. **Núcleo macizo opaco** (`MoundCore`, un `ArrayMesh` generado por código):
+   el mismo sólido de revolución del perfil `r(f) = base_radius·(1−f)^0.8`, hundido
+   5 cm bajo la superficie, con relieve de ruido y una **textura de briznas
+   procedural** (veteado + 2.600 fibras). Es opaco y más oscuro que las hebras, así
+   que lo poco que asoma entre hebra y hebra se lee como **sombra de paja compacta**,
+   nunca como un agujero.
+2. **Todas las hebras en la superficie** (antes el 75 % estaban enterradas en el
+   interior, donde no las ve nadie): viven en una capa de ~10 cm y van **tangentes al
+   perfil**, como paja tumbada sobre el montón, con desorden de ±12°.
+   Con 50.000 hebras son ~**250 hebras/m²** y la cobertura estimada del núcleo pasa
+   del ~2 % al **~99 %** (se calcula y se imprime en el log al generar).
+3. **Falda de hebras sueltas** (7 %) alrededor de la base, apoyadas en el suelo, para
+   que no se vea la costura entre el montón y el césped.
+
+## Lo que sigue igual
+
+- `base_radius`: 7.5 m · `pile_height`: 3.4 m · perfil cóncavo → sólido **convexo** →
+  un único `ConvexPolygonShape3D`: se **sube andando** (pendiente base ~29°, el
+  jugador soporta 45°) y el clic recoge la hebra más cercana al impacto.
+- `MultiMesh` por tier (3 draw calls), tiers común / seca / dorada, regeneración
+  automática al vaciar el montón, y la punta sigue reservada para la **aguja** futura.
+
+## Coste y cómo ajustarlo
+
+| | v4 | v5 |
+|---|---|---|
+| Hebras | 18.000 | **50.000** |
+| Triángulos | 432.000 (24 por hebra) | 600.000 (**12** por hebra: cilindro de 6 lados y **sin tapas**) |
+| Draw calls | 3 | 3 + 1 (núcleo) |
+
+Las hebras no proyectan sombra (ya era así); el núcleo sí, para que el montón se
+asiente en el suelo.
+
+- ¿Va justo de FPS? Baja `total_straws` a 30.000 (sigue siendo ~150 hebras/m² y
+  ~96 % de cobertura: el núcleo opaco hace que bajar la densidad deje de ser
+  catastrófico, sólo se ve algo más de paja compacta).
+- ¿Sobra GPU? Súbelo a 80.000. El límite práctico es la memoria del
+  `MultiMesh` (~64 bytes por hebra) y los triángulos, no el número de draw calls.
+- `core_enabled = false` deja el montón como antes (sin núcleo) para comparar.
+
+---
+
+# (histórico) Montón de Paja v4 — "megamontón" caminable
 
 Montículo procedural enorme con **18000 hebras cortas y HORIZONTALES** (cilindros finos) dibujadas con **MultiMesh** (un draw call por calidad). Un solo `PileCollision` (hull convexo) sirve para **subir andando** y para recoger: el clic elige la hebra más cercana al impacto.
 
