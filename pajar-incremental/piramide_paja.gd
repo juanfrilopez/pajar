@@ -1057,18 +1057,41 @@ func try_pick_multiple_around(jugador, center_local: Vector3, cantidad: int) -> 
 
 		var remaining: int = get_remaining_count()
 		if remaining == 0 and auto_regenerate:
-			if not is_regenerating:
-				is_regenerating = true
-				await get_tree().create_timer(regenerate_delay).timeout
-				is_regenerating = false
-				generate_pile()
-				crear_texto_flotante("¡Montón renovado!", Color.GREEN)
+			# OJO: nada de "await" aquí dentro. Si esta función tuviera un await
+			# pasaría a ser corrutina y devolvería una señal en vez de un int, y
+			# GDScript obligaría a llamarla siempre con "await" (error en
+			# _try_pick_single: 'Function "try_pick_multiple_around()" is a
+			# coroutine, so it must be called with "await"'). La espera se
+			# delega en _programar_regeneracion(), que usa la señal del timer.
+			_programar_regeneracion()
 		elif remaining > 0:
 			_apply_settle_effect(center_local)
 	else:
 		if jugador.paja_en_mano >= jugador.capacidad_max:
 			crear_texto_flotante("¡Mano llena!", Color.RED, to_global(center_local))
 	return picked
+
+# Regeneración diferida SIN corrutinas: usamos la señal timeout del SceneTreeTimer
+# en vez de "await". Así ninguna función de la cadena de recogida
+# (try_pick_multiple_around -> _try_pick_single -> try_pick_straw -> hacer_clic)
+# se convierte en corrutina y todas siguen devolviendo su valor normal.
+func _programar_regeneracion() -> void:
+	if is_regenerating:
+		return
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		# Sin árbol de escena no hay timer: regeneramos en el acto.
+		generate_pile()
+		return
+	is_regenerating = true
+	var t: SceneTreeTimer = tree.create_timer(regenerate_delay)
+	t.timeout.connect(_on_regenerate_timeout, CONNECT_ONE_SHOT)
+
+func _on_regenerate_timeout() -> void:
+	# generate_pile() aborta si is_regenerating sigue en true, así que se limpia antes.
+	is_regenerating = false
+	generate_pile()
+	crear_texto_flotante("¡Montón renovado!", Color.GREEN)
 
 func _try_pick_single(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO) -> int:
 	if index < 0 or index >= straws.size():
