@@ -15,6 +15,13 @@ extends Node3D
 #   (±14° de inclinación respecto al suelo).
 # - 25% pegadas a la superficie (costra "peluda"), el resto rellena
 #   el interior en proporción al volumen del montón.
+#
+# MUY IMPORTANTE (regresión ya sufrida): la transform de cada hebra se
+# construye escalando las COLUMNAS de la base (escala en el marco LOCAL del
+# cilindro). NO usar Basis.scaled() para esto: en Godot scaled() multiplica
+# las FILAS (escala en el marco del PADRE), lo que aplasta el alcance
+# horizontal de la hebra al grosor y deja "agujas" casi VERTICALES.
+# Véase _straw_transform() y _verify_straws_are_horizontal().
 
 @export var total_straws: int = 18000
 @export var base_radius: float = 7.5
@@ -290,7 +297,7 @@ func _fill_multimeshes(buckets: Array) -> void:
 		mm.mesh = _straw_mesh
 		mm.instance_count = maxi(list.size(), 1)
 		if list.is_empty():
-			mm.set_instance_transform(0, Transform3D(Basis().scaled(Vector3.ZERO), Vector3(0, -50, 0)))
+			mm.set_instance_transform(0, Transform3D(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0, -50, 0)))
 			mm.set_instance_color(0, Color(1, 1, 1, 0))
 		else:
 			for j in range(list.size()):
@@ -300,11 +307,58 @@ func _fill_multimeshes(buckets: Array) -> void:
 				mm.set_instance_color(j, s.color)
 		_mms[tier] = mm
 		_mmis[tier].multimesh = mm
+	_verify_straws_are_horizontal()
 
+# Anti-regresión: lee las transforms YA SUBIDAS al MultiMesh y comprueba que
+# el eje del cilindro (columna Y) está tumbado. Si alguna semántica de Godot
+# cambia y las hebras vuelven a salir verticales, esto avisa en el log en vez
+# de quedarse en un bug silencioso (ya nos pasó con Basis.scaled()).
+func _verify_straws_are_horizontal() -> void:
+	var checked: int = 0
+	var bad: int = 0
+	var max_deg: float = 0.0
+	for tier in range(3):
+		var mm: MultiMesh = _mms[tier]
+		if mm == null or mm.instance_count == 0:
+			continue
+		var samples: int = mini(mm.instance_count, 64)
+		for j in range(samples):
+			var t: Transform3D = mm.get_instance_transform(j)
+			var axis_y: Vector3 = t.basis.get_column(1)
+			var len_sq: float = axis_y.length_squared()
+			if len_sq < 1e-10:
+				continue  # instancia oculta
+			var up_ratio: float = absf(axis_y.y) / sqrt(len_sq)
+			var ang: float = rad_to_deg(asinf(clampf(up_ratio, 0.0, 1.0)))
+			max_deg = maxf(max_deg, ang)
+			checked += 1
+			if ang > 30.0:
+				bad += 1
+	if checked == 0:
+		return
+	if bad > 0:
+		DebugLogger.log("AVISO REGRESIÓN: %d/%d hebras muestreadas del MultiMesh salen inclinadas >30° (máx %.0f°); revisa _straw_transform()" % [bad, checked, max_deg])
+	else:
+		DebugLogger.log("OK: %d hebras muestreadas del MultiMesh están horizontales (inclinación máx %.1f°)" % [checked, max_deg])
+
+# Transform de una hebra para el MultiMesh.
+#
+# El cilindro base crece sobre +Y, así que la COLUMNA Y de la base debe ser
+# `axis_dir * length` (la hebra tumbada), y las columnas X/Z el grosor.
+# Se escala en el marco LOCAL construyendo las columnas a mano:
+# columna i = (base_rot * e_i) * escala_i.
+#
+# OJO: NO usar `basis.scaled(Vector3(th, len, th))` aquí. En Godot,
+# Basis.scaled() multiplica las FILAS por el vector de escala, es decir,
+# aplica la escala en el marco del PADRE. Con eso el eje largo de la hebra
+# queda apuntando casi al +Y del mundo y la hebra se ve VERTICAL (además de
+# encogerse). Este fue el bug que hacía que las pajas se vieran de pie.
 func _straw_transform(data: StrawData) -> Transform3D:
-	var basis: Basis = _straw_basis(data.axis_dir)
-	basis = basis.scaled(Vector3(data.thickness, data.length, data.thickness))
-	return Transform3D(basis, data.position)
+	var rot: Basis = _straw_basis(data.axis_dir)
+	var col_x: Vector3 = rot.get_column(0) * data.thickness
+	var col_y: Vector3 = rot.get_column(1) * data.length
+	var col_z: Vector3 = rot.get_column(2) * data.thickness
+	return Transform3D(col_x, col_y, col_z, data.position)
 
 func _hide_instance(data: StrawData) -> void:
 	if data.mm_index < 0:
@@ -312,7 +366,7 @@ func _hide_instance(data: StrawData) -> void:
 	var mm: MultiMesh = _mms[data.tier]
 	if mm == null:
 		return
-	mm.set_instance_transform(data.mm_index, Transform3D(Basis().scaled(Vector3.ZERO), Vector3(0, -80, 0)))
+	mm.set_instance_transform(data.mm_index, Transform3D(Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0, -80, 0)))
 
 func _sync_instance(data: StrawData) -> void:
 	if data.is_removed or data.mm_index < 0:
