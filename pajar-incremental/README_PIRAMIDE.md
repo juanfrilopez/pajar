@@ -33,6 +33,11 @@ La v5 cambia el enfoque. La paja no rellena un volumen: forma una **costra** sob
 - `base_radius`: 7.5 m · `pile_height`: 3.4 m · perfil cóncavo → sólido **convexo** →
   un único `ConvexPolygonShape3D`: se **sube andando** (pendiente base ~29°, el
   jugador soporta 45°) y el clic recoge la hebra más cercana al impacto.
+- **Toda la paja es cogible**: la falda y las hebras bajas de la ladera quedan fuera
+  de la hitbox del montón, así que el suelo dentro de la zona de recogida
+  (`suelo_click.gd`) reenvía el clic al montón, que recoge la hebra más cercana al
+  impacto. La falda llega hasta `base_radius·1.18` (~8.85 m) más media hebra; la
+  zona clickeable cubre hasta ~9.7 m alrededor del centro.
 - `MultiMesh` por tier (3 draw calls), tiers común / seca / dorada, regeneración
   automática al vaciar el montón, y la punta sigue reservada para la **aguja** futura.
 
