@@ -169,6 +169,13 @@ Este sistema implementa una pirámide de paja interactiva en 3D con forma orgán
 - Asegúrate que el jugador esté cerca de la pirámide
 - Comprueba que hay briznas expuestas disponibles
 
+### Problema: `Error en (327, 35): Function "get_column()" not found in base Basis`
+- `Basis.get_column()` / `get_row()` / `set_column()` existen **solo en C++**; no están expuestos a GDScript en ninguna versión de Godot 4 (comprobado contra `doc/classes/Basis.xml` de 4.0 → 4.7). Como `Basis` es un tipo *built-in*, el analizador lo convierte en **error de compilación**, no en aviso: el script entero deja de cargar.
+- En GDScript las columnas de la matriz son las propiedades `basis.x`, `basis.y`, `basis.z` (columna 0, 1 y 2). Equivalente a `basis * Vector3(1,0,0)`, `basis * Vector3.UP`, etc. El constructor `Transform3D(x_axis, y_axis, z_axis, origin)` recibe esas mismas columnas.
+- En este proyecto afectaba a `_straw_transform()` (escalado local de la hebra) y a `_verify_straws_are_horizontal()` (anti-regresión de hebras verticales). Ya corregido.
+- Ojo con el mismo tipo de error en `asinf()`: **no existe**. La función global es `asin()`. Los sufijos `f` solo existen en `absf, ceilf, clampf, floorf, is_finite, lerpf, maxf, minf, randf, roundf, signf, snappedf, wrapf`.
+- Sobre **clases nativas** (`Node`, `MultiMesh`, …) llamar a un método inexistente solo genera el aviso `UNSAFE_METHOD_ACCESS`; sobre built-ins y sobre `self` es error duro. Por eso este fallo bloqueaba todo el proyecto.
+
 ### Problema: Texto flotante no aparece
 - Verifica el código de crear_texto_flotante
 - Asegúrate de que el Label3D se añada a la escena correcta
