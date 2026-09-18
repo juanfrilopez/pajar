@@ -1,24 +1,21 @@
-[gd_scene format=3 load_steps=4]
+[gd_scene format=3 uid="uid://c8k2p9a1m3n4o5p6"]
 
-[ext_resource type="Script" path="res://piramide_paja.gd" id="1_script"]
+[ext_resource type="Script" path="res://piramide_paja.gd" id="1_paja"]
 
-[sub_resource type="BoxShape3D" id="box_shape"]
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_pile"]
+height = 1.8
+radius = 3.0
 
-[sub_resource type="SphereShape3D" id="sphere_shape"]
-radius = 4.0
-
-[node name="PiramidePaja" type="StaticBody3D"]
-script = ExtResource("1_script")
+[node name="PiramidePaja" type="Node3D"]
+script = ExtResource("1_paja")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+[node name="Straws" type="Node3D" parent="." unique_id=1001]
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-shape = SubResource("box_shape")
+[node name="PileCollision" type="StaticBody3D" parent="." unique_id=1002]
+collision_layer = 1
+collision_mask = 1
 
-[node name="SelectionArea" type="Area3D" parent="."]
-collision_layer = 2
-collision_mask = 2
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="SelectionArea"]
-shape = SubResource("sphere_shape")
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PileCollision" unique_id=1003]
+shape = SubResource("CylinderShape3D_pile")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
