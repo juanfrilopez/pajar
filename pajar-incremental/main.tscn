@@ -51,7 +51,7 @@ roughness = 0.8
 [node name="DebugLogger" parent="." unique_id=999999999 instance=ExtResource("2_logger")]
 
 [node name="PiramidePaja" parent="." unique_id=853038620 instance=ExtResource("1_1bvp3")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -8)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=211060373]
 transform = Transform3D(0.70710677, -0.49999997, 0.49999997, 0, 0.70710677, 0.70710677, -0.70710677, -0.49999997, 0.49999997, 10, 10, 5)
@@ -78,7 +78,7 @@ text = "Oro: 0"
 [node name="LabelHelp" type="Label" parent="UI/VBoxContainer" unique_id=1314552414]
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
-text = "WASD mover, Mouse mirar, Click hebra/vaca, Espacio saltar, ESC raton"
+text = "WASD mover, Mouse mirar, Click hebra/vaca, Espacio saltar. Sube al montón de paja andando hasta la punta, ESC raton"
 
 [node name="ColorRect" type="ColorRect" parent="UI" unique_id=959928594]
 custom_minimum_size = Vector2(6, 6)

@@ -1,14 +1,36 @@
 extends Node3D
-# v3 - Montón de paja ultrafina (~1900 hebras) con MultiMesh.
-# Un draw call por tier; un solo cuerpo de colisión para caminar y recoger.
+# v4 - "Megamontón" de paja: montículo enorme con hebras CORTAS y HORIZONTALES.
+#
+# Montón (deja sitio para la AGUJA futura en la punta):
+# - Perfil r(f) = base_radius * (1 - f)^MOUND_EXP, con f = y / pile_height.
+#   El perfil es cóncavo, así que el sólido de revolución es CONVEXO:
+#   basta un único ConvexPolygonShape3D como colisión (caminar y recoger).
+# - Pendiente base ~29°: se puede subir ANDANDO por el montón
+#   (el jugador tiene floor_max_angle de 45°).
+# - La punta queda afilada: ahí irá la aguja en el futuro.
+#
+# Hebras:
+# - MultiMesh (un draw call por tier), total_straws hebras.
+# - Cortas (0.35-0.8 m), ultrafinas, tumbadas casi en HORIZONTAL
+#   (±14° de inclinación respecto al suelo).
+# - 25% pegadas a la superficie (costra "peluda"), el resto rellena
+#   el interior en proporción al volumen del montón.
 
-@export var total_straws: int = 1900
-@export var base_radius: float = 2.5
-@export var pile_height: float = 1.65
+@export var total_straws: int = 18000
+@export var base_radius: float = 7.5
+@export var pile_height: float = 3.4
 @export var auto_regenerate: bool = true
 @export var regenerate_delay: float = 2.0
 @export var use_seed: bool = true
 @export var pile_seed: int = 1900
+
+const MOUND_EXP: float = 0.8            # Perfil: r(f) = R * (1 - f)^MOUND_EXP
+const SURFACE_LAYER_RATIO: float = 0.25 # Fracción de hebras sobre la superficie
+const STRAW_TILT_DEG: float = 14.0      # Inclinación máx. respecto al horizontal (grados)
+const STRAW_LEN_MIN: float = 0.35
+const STRAW_LEN_MAX: float = 0.80
+const MOUND_RINGS: int = 15             # Muestras del perfil para la colisión
+const MOUND_SEGS: int = 20              # Muestras radiales para la colisión
 
 enum StrawTier {
 	TIER_1_COMMON = 0,
@@ -39,16 +61,16 @@ class StrawData:
 	var tier: int
 	var mm_index: int = -1
 	var position: Vector3
-	var rotation: Vector3
+	var axis_dir: Vector3  # Dirección del eje de la hebra (≈horizontal)
 	var length: float
 	var thickness: float
 	var color: Color
 	var is_removed: bool = false
-	func _init(idx: int, t: int, pos: Vector3, rot: Vector3, len: float, thick: float, col: Color):
+	func _init(idx: int, t: int, pos: Vector3, axis: Vector3, len: float, thick: float, col: Color):
 		index = idx
 		tier = t
 		position = pos
-		rotation = rot
+		axis_dir = axis
 		length = len
 		thickness = thick
 		color = col
@@ -78,7 +100,7 @@ func _ready():
 	_ensure_multimeshes()
 	_ensure_pile_collision()
 	generate_pile()
-	DebugLogger.log("Piramide paja v3 inicializada con %d hebras ultrafinas" % total_straws)
+	DebugLogger.log("Monton de paja v4 inicializado: megamontón de %d hebras cortas y horizontales" % total_straws)
 
 func _ensure_shared_resources():
 	if _straw_mesh == null:
@@ -125,18 +147,93 @@ func _ensure_pile_collision():
 	else:
 		pile_collision_body = StaticBody3D.new()
 		pile_collision_body.name = "PileCollision"
-		var col_shape: CollisionShape3D = CollisionShape3D.new()
-		var cyl: CylinderShape3D = CylinderShape3D.new()
-		cyl.height = pile_height
-		cyl.radius = base_radius
-		col_shape.shape = cyl
-		col_shape.position = Vector3(0, pile_height * 0.5, 0)
-		pile_collision_body.add_child(col_shape)
 		add_child(pile_collision_body)
 	pile_collision_body.collision_layer = 1
 	pile_collision_body.collision_mask = 1
 	if pile_collision_body.get_script() != _pile_click_script:
 		pile_collision_body.set_script(_pile_click_script)
+
+# ---------- Geometria del montón ----------
+
+# Radio del perfil a una fracción f de la altura (0 = base, 1 = punta)
+func profile_radius(f: float) -> float:
+	var t: float = clampf(1.0 - f, 0.0, 1.0)
+	return base_radius * pow(t, MOUND_EXP)
+
+func profile_radius_at_y(y: float) -> float:
+	if pile_height <= 0.001:
+		return base_radius
+	return profile_radius(y / pile_height)
+
+# Eje de una hebra tumbada: casi horizontal, azimut aleatorio
+func _horizontal_axis() -> Vector3:
+	var azimuth: float = randf() * TAU
+	var tilt: float = deg_to_rad(randf_range(-STRAW_TILT_DEG, STRAW_TILT_DEG))
+	var dir: Vector3 = Vector3(0, 0, 1)
+	dir = dir.rotated(Vector3.RIGHT, tilt)   # sale del plano horizontal
+	dir = dir.rotated(Vector3.UP, azimuth)  # orientación en el plano horizontal
+	return dir.normalized()
+
+# Hebra sobre la superficie del montón (costra peluda)
+func _surface_position() -> Vector3:
+	var r: float = sqrt(randf()) * base_radius
+	var f: float = 1.0 - pow(r / base_radius, 1.0 / MOUND_EXP)
+	var y: float = clampf(f * pile_height + randf_range(0.0, 0.12), 0.02, pile_height + 0.12)
+	var angle: float = randf() * TAU
+	var rr: float = r * randf_range(0.97, 1.0)
+	return Vector3(cos(angle) * rr, y, sin(angle) * rr)
+
+# Hebra en el interior, distribuida en proporción al volumen: F(f) = 1 - (1-f)^(2*MOUND_EXP+1)
+func _interior_position() -> Vector3:
+	var f: float = 1.0 - pow(1.0 - randf(), 1.0 / (2.0 * MOUND_EXP + 1.0))
+	var max_r: float = profile_radius(f)
+	var r: float = sqrt(randf()) * max_r
+	var angle: float = randf() * TAU
+	var y: float = clampf(f * pile_height + randf_range(-0.02, 0.02), 0.02, pile_height)
+	return Vector3(cos(angle) * r, y, sin(angle) * r)
+
+# Base ortogonal cuyo eje Y apunta a la dirección del eje de la hebra
+func _straw_basis(axis: Vector3) -> Basis:
+	var x_axis: Vector3 = axis.cross(Vector3.UP)
+	if x_axis.length_squared() < 0.0001:
+		x_axis = Vector3.RIGHT
+	x_axis = x_axis.normalized()
+	var z_axis: Vector3 = x_axis.cross(axis)
+	var b: Basis = Basis()
+	b.set_columns(x_axis, axis, z_axis)
+	return b
+
+# Puntos para el hull convexo del montón (perfil cóncavo => sólido convexo)
+func _build_mound_points() -> PackedVector3Array:
+	var pts: PackedVector3Array = PackedVector3Array()
+	pts.append(Vector3(0, 0, 0))
+	for k in range(MOUND_RINGS):
+		var f: float = float(k) / float(MOUND_RINGS)
+		var rr: float = profile_radius(f)
+		var y: float = f * pile_height
+		for s in range(MOUND_SEGS):
+			var a: float = TAU * float(s) / float(MOUND_SEGS)
+			pts.append(Vector3(cos(a) * rr, y, sin(a) * rr))
+	pts.append(Vector3(0, pile_height, 0))  # punta afilada: sitio de la aguja futura
+	return pts
+
+func _sync_pile_collision() -> void:
+	if pile_collision_body == null:
+		return
+	var shape_node: CollisionShape3D = null
+	for child in pile_collision_body.get_children():
+		if child is CollisionShape3D:
+			shape_node = child
+			break
+	if shape_node == null:
+		shape_node = CollisionShape3D.new()
+		pile_collision_body.add_child(shape_node)
+	shape_node.position = Vector3.ZERO
+	var shape: ConvexPolygonShape3D = ConvexPolygonShape3D.new()
+	shape.points = _build_mound_points()
+	shape_node.shape = shape
+
+# ---------- Generacion ----------
 
 func clear_pile():
 	straws.clear()
@@ -155,28 +252,17 @@ func generate_pile():
 	var buckets: Array = [[], [], []]
 
 	for i in range(total_straws):
-		var height_factor: float = pow(randf(), 1.45)
-		var y: float = height_factor * pile_height + randf_range(-0.02, 0.02)
-		var max_r: float = base_radius * (1.0 - height_factor * 0.58)
-		var r: float = sqrt(randf()) * max_r
-		var angle: float = randf() * TAU
-		var x: float = cos(angle) * r + randf_range(-0.04, 0.04)
-		var z: float = sin(angle) * r + randf_range(-0.04, 0.04)
+		var pos: Vector3
+		if randf() < SURFACE_LAYER_RATIO:
+			pos = _surface_position()
+		else:
+			pos = _interior_position()
 
-		var tier: int = determine_tier_by_height(height_factor)
-		# Ultrafina: radio ~0.6–1.4 cm (antes las cajas medían 3.5–7 cm)
-		var thickness: float = randf_range(0.006, 0.014)
-		var length: float = randf_range(0.55, 1.25)
-
-		var rot_y: float = randf() * TAU
-		var tilt_range: float = lerpf(12.0, 32.0, height_factor)
-		var rot_x: float = deg_to_rad(90.0 + randf_range(-tilt_range, tilt_range))
-		var rot_z: float = deg_to_rad(randf_range(-16.0, 16.0))
-		var to_center: Vector2 = Vector2(-x, -z)
-		if to_center.length() > 0.001:
-			to_center = to_center.normalized()
-			rot_x += to_center.x * 0.04
-			rot_z += to_center.y * 0.04
+		var tier: int = determine_tier_by_height(pos.y / pile_height)
+		# Ultrafina y corta: radio ~0.6-1.5 cm, longitud 0.35-0.8 m
+		var thickness: float = randf_range(0.006, 0.015)
+		var length: float = randf_range(STRAW_LEN_MIN, STRAW_LEN_MAX)
+		var axis: Vector3 = _horizontal_axis()
 
 		var base_color: Color = STRAW_TIERS[tier]["color"]
 		var varied: Color = Color(
@@ -184,13 +270,13 @@ func generate_pile():
 			clampf(base_color.g * randf_range(0.88, 1.10), 0.0, 1.0),
 			clampf(base_color.b * randf_range(0.88, 1.12), 0.0, 1.0)
 		)
-		var data: StrawData = StrawData.new(i, tier, Vector3(x, y, z), Vector3(rot_x, rot_y, rot_z), length, thickness, varied)
+		var data: StrawData = StrawData.new(i, tier, pos, axis, length, thickness, varied)
 		straws.append(data)
 		buckets[tier].append(data)
 
 	_fill_multimeshes(buckets)
 	_sync_pile_collision()
-	DebugLogger.log("Monton v3 generado: %d hebras ultrafinas" % straws.size())
+	DebugLogger.log("Megamontón v4 generado: %d hebras cortas y horizontales (R=%.1f m, H=%.1f m)" % [straws.size(), base_radius, pile_height])
 
 func _fill_multimeshes(buckets: Array) -> void:
 	for tier in range(3):
@@ -213,7 +299,7 @@ func _fill_multimeshes(buckets: Array) -> void:
 		_mmis[tier].multimesh = mm
 
 func _straw_transform(data: StrawData) -> Transform3D:
-	var basis: Basis = Basis.from_euler(data.rotation)
+	var basis: Basis = _straw_basis(data.axis_dir)
 	basis = basis.scaled(Vector3(data.thickness, data.length, data.thickness))
 	return Transform3D(basis, data.position)
 
@@ -232,15 +318,6 @@ func _sync_instance(data: StrawData) -> void:
 	if mm == null:
 		return
 	mm.set_instance_transform(data.mm_index, _straw_transform(data))
-
-func _sync_pile_collision() -> void:
-	if pile_collision_body == null:
-		return
-	for child in pile_collision_body.get_children():
-		if child is CollisionShape3D and child.shape is CylinderShape3D:
-			(child.shape as CylinderShape3D).height = pile_height
-			(child.shape as CylinderShape3D).radius = base_radius
-			child.position = Vector3(0, pile_height * 0.5, 0)
 
 func determine_tier_by_height(ratio: float) -> int:
 	if ratio < 0.45:
@@ -261,6 +338,8 @@ func determine_tier_by_height(ratio: float) -> int:
 			return StrawTier.TIER_2_DRY
 		else:
 			return StrawTier.TIER_3_GOLDEN
+
+# ---------- Recoleccion ----------
 
 func try_pick_straw(index: int, jugador, _hit_pos: Vector3 = Vector3.ZERO):
 	if index < 0 or index >= straws.size():
@@ -365,6 +444,7 @@ func find_closest_straw(world_pos: Vector3) -> int:
 			best_idx = i
 	return best_idx
 
+# Hebras "expuestas": las que están cerca de la superficie del montón
 func get_exposed_straws() -> Array:
 	var exposed: Array = []
 	for i in range(straws.size()):
@@ -372,11 +452,11 @@ func get_exposed_straws() -> Array:
 		if s.is_removed:
 			continue
 		var dist_from_center: float = Vector2(s.position.x, s.position.z).length()
-		var height_ratio: float = 0.0
+		var f: float = 0.0
 		if pile_height > 0.001:
-			height_ratio = s.position.y / pile_height
-		var max_r_at_height: float = base_radius * (1.0 - height_ratio * 0.5)
-		if dist_from_center > max_r_at_height * 0.65 or s.position.y > pile_height * 0.5:
+			f = s.position.y / pile_height
+		var max_r_at_height: float = profile_radius(f)
+		if dist_from_center > max_r_at_height * 0.8 or s.position.y > pile_height * 0.8:
 			exposed.append(i)
 	if exposed.size() < 10:
 		exposed.clear()
@@ -401,8 +481,9 @@ func crear_texto_flotante(texto: String, color: Color):
 	tween.chain().tween_callback(label.queue_free)
 
 func debug_info():
-	DebugLogger.log("=== Piramide Debug v3 ===")
+	DebugLogger.log("=== Monton Debug v4 (megamontón) ===")
 	DebugLogger.log("Total: %d Restantes: %d" % [straws.size(), get_remaining_count()])
+	DebugLogger.log("Montón: R=%.1f m  H=%.1f m  (pendiente base ~29°, se sube andando)" % [base_radius, pile_height])
 	var counts: Array[int] = [0, 0, 0]
 	for s in straws:
 		if not s.is_removed:
